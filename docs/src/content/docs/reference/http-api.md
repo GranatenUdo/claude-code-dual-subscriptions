@@ -3,7 +3,7 @@ title: HTTP API
 description: Local routes for health checks, Anthropic Messages, token counts, model discovery, OpenAI-compatible requests, and Codex images.
 ---
 
-The server exposes the Anthropic and OpenAI routes supported by the proxy. Each route uses the configured provider credential for the selected model.
+The server exposes the Anthropic and OpenAI routes supported by the proxy. Native Anthropic Messages and token-count routes use the credentials supplied by Claude Code. Translating providers use their separate proxy-owned credentials; client headers and query credentials are discarded before dispatch to them.
 
 <div class="security-callout">
 <strong>No client authentication.</strong> The listener accepts requests without validating `Authorization` or `x-api-key`. Loopback is the default. Protect every non-loopback listener with a firewall or authenticating reverse proxy.
@@ -31,11 +31,11 @@ The `monitor` CLI polls this endpoint. There is no corresponding mutation or shu
 
 Accepts an Anthropic Messages request in streaming or non-streaming mode. `POST /v1/messages?beta=true` reaches the same route.
 
-The request `model` selects the provider. The proxy translates supported message content, system prompts, thinking settings, tool definitions, tool choice, tool calls, tool results, images, output configuration, metadata, and streaming behavior according to the provider.
+The request `model` selects the provider. For native Claude in `aliasProvider=anthropic` mode, the proxy forwards original fields and OAuth/beta/version headers to the fixed Anthropic upstream, preserving response bytes, errors and streaming mode. Local aliases and foreign thinking summaries are the only request transformations. For translating providers, the proxy translates supported message content, system prompts, thinking settings, tool definitions, tool choice, tool calls, tool results, images, output configuration, metadata, and streaming behavior according to the provider.
 
-Streaming responses use Anthropic SSE events such as `message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`, `message_delta`, and `message_stop`. Non-streaming requests are accumulated from the provider's stream.
+Streaming responses use Anthropic SSE events such as `message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`, `message_delta`, and `message_stop`. Translating providers accumulate non-streaming responses from upstream streams; native Anthropic responses are relayed as received.
 
-Unknown models return HTTP 400 with the supported catalog. Missing provider auth returns HTTP 401.
+Unknown non-Claude models return HTTP 400 with the supported catalog. In dual mode new `claude-*` IDs are forwarded for native validation. Missing translating-provider auth returns HTTP 401; native auth failures preserve Anthropic responses.
 
 ## `POST /v1/messages/count_tokens`
 
@@ -44,6 +44,8 @@ Accepts the same basic Anthropic request shape and returns:
 ```json
 {"input_tokens":1234}
 ```
+
+Native Claude token counting is forwarded to Anthropic with client auth and can return native errors. It is not a local estimate.
 
 Codex tokenizes text locally with `o200k_base` and adds estimates for images, encrypted reasoning, and protocol framing. Kimi, Grok, and OpenCode Go use local text heuristics, while Cursor estimates the rendered prompt from its character length. Counts support Claude Code compaction behavior and are estimates rather than provider billing values.
 
@@ -158,6 +160,8 @@ The setting applies without changing the requested `tool_choice` mode. This incl
 Codex Responses uses native passthrough and forwards `parallel_tool_calls` unchanged. Codex Chat Completions has its own field allowlist and rejects `parallel_tool_calls` because that path does not support function tools.
 
 ## OpenAI routing, sessions, and errors
+
+Native Anthropic models are not supported on the OpenAI-compatible routes, even when they appear in model discovery.
 
 Both OpenAI routes strip a trailing `[1m]`, resolve configured aliases, and choose the provider from `model`. Aliases follow `aliasProvider`, while explicit provider model IDs keep their provider. Unknown models return HTTP 400 with the supported model list.
 

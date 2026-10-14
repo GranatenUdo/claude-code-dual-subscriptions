@@ -5,6 +5,8 @@ description: Canonical claude-code-proxy command syntax for serving, monitoring,
 
 Running `claude-code-proxy` without a subcommand is equivalent to `claude-code-proxy serve`.
 
+The project is named `claude-code-dual-subscriptions`; the executable name is unchanged. Build it from [this fork's source](/getting-started/). Prefix server and model-list commands with `CCP_ALIAS_PROVIDER=anthropic` for dual mode; omitting it retains the legacy Codex alias default.
+
 ## Global version commands
 
 ```sh
@@ -56,6 +58,8 @@ claude-code-proxy models [--full]
 
 Prints supported IDs grouped by provider. The default output compacts Cursor's runtime catalog. `--full` prints every Cursor alias.
 
+There is no `anthropic auth` CLI command: use Claude Code's own login and refresh.
+
 ## Provider authentication
 
 The command shape is:
@@ -89,10 +93,10 @@ Logout removes the local proxy-owned credential. It does not call the provider t
 From a source checkout:
 
 ```sh
-cargo run -- serve
-cargo test --all
-cargo fmt --all --check
-cargo clippy --all-targets -- -D warnings
+CCP_ALIAS_PROVIDER=anthropic cargo run -- serve
+cargo test --all --locked
+cargo fmt --all -- --check
+cargo clippy --all-targets --locked -- -D warnings
 just check
 just docs
 ```

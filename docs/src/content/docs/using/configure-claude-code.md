@@ -1,68 +1,73 @@
 ---
 title: Configure Claude Code
-description: Set Claude Code client variables for claude-code-proxy without mixing them with CCP proxy configuration.
+description: Preserve Claude Code subscription OAuth while routing GPT requests through separate Codex authentication.
 ---
 
-Claude Code reads its API connection when the process starts. These variables belong to **Claude Code**, not to the proxy server.
+Configure the server and client separately. For this fork's primary workflow,
+start the server with `CCP_ALIAS_PROVIDER=anthropic`. The built-in default
+remains `codex` for compatibility.
 
-## Minimal client contract
+## Client launch for dual subscriptions
+
+Keep Claude Code's saved claude.ai login and set the base URL:
 
 ```sh
-ANTHROPIC_BASE_URL=http://127.0.0.1:18765 \
-ANTHROPIC_AUTH_TOKEN=unused \
-ANTHROPIC_MODEL=gpt-6-sol[1m] \
-ANTHROPIC_SMALL_FAST_MODEL=gpt-6-luna[1m] \
-CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
-CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1 \
-  claude
+env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY \
+  ANTHROPIC_BASE_URL=http://127.0.0.1:18765 \
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+  CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1 \
+  claude --model claude-opus-5
 ```
 
-| Claude Code variable | Purpose |
+These are manual live-use instructions. This fork has only been mock-tested.
+
+## Authentication precedence
+
+Setting only `ANTHROPIC_BASE_URL` retains Claude Code's saved subscription login.
+An `ANTHROPIC_AUTH_TOKEN`, approved `ANTHROPIC_API_KEY`, or configured
+`apiKeyHelper` takes precedence over that login. A dummy token disables the
+subscription path and can cause a native Anthropic 401.
+
+Settings-file `env` entries can override shell values. Unsetting shell variables
+does not remove settings-file credentials or helpers. Inspect existing
+configuration and choose the intended credential source without printing or
+copying secrets. Do not log out merely to use this proxy.
+See [Claude Code auth precedence](https://code.claude.com/docs/en/llm-gateway-connect#conflicts-with-an-existing-login).
+
+The proxy forwards Anthropic auth, OAuth beta and version headers only to the
+fixed Anthropic upstream. It never reads or refreshes Anthropic credentials.
+Codex uses `claude-code-proxy codex auth login` independently.
+Deliberately supplied Anthropic API keys are forwarded too, but are API billing,
+not the subscription workflow.
+
+## Model and context controls
+
+| Client setting | Purpose |
 | --- | --- |
-| `ANTHROPIC_BASE_URL` | Sends Anthropic API requests to the local proxy. |
-| `ANTHROPIC_AUTH_TOKEN` | Satisfies Claude Code's client credential requirement. The proxy does not use it for upstream auth. |
-| `ANTHROPIC_MODEL` | Selects the main request model and therefore the provider. |
-| `ANTHROPIC_SMALL_FAST_MODEL` | Selects the model for title generation, token-related background work, and other small requests. Use a model the proxy routes. |
-| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` | Reduces background traffic sent to the subscription provider. |
-| `CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1` | Prevents Claude Code from retrying a partially completed stream as non-streaming, which can duplicate tool calls. |
+| `ANTHROPIC_BASE_URL` | Local proxy URL |
+| `ANTHROPIC_MODEL` or `--model` | Initial model; use `/model` for subsequent turns |
+| `ANTHROPIC_SMALL_FAST_MODEL` | Optional fixed background model, independent of the main model |
+| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` | Reduces nonessential client traffic |
+| `CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1` | Avoids fallback replay after a partially completed stream |
 
-The proxy always makes streaming upstream requests. It can still accumulate a non-streaming Anthropic response when the client requests one.
+A fixed small model keeps using its provider even when the main model changes.
+Leave it unset initially or choose a concrete ID intentionally.
 
-## Compaction settings
+The native Anthropic route preserves the requested streaming mode. Translating
+providers can accumulate upstream streams into non-streaming responses.
+A trailing `[1m]` is a client context hint stripped by the proxy; it does not
+increase account context limits. Use a conservative limit valid for every model
+you intend to switch between, or omit overrides and compact before switching a
+large history. No single context override is prescribed for dual mode.
 
-A trailing `[1m]` tells Claude Code to use its larger local context policy. The proxy strips the suffix before upstream routing. It does not enlarge the provider's context window.
+## Scope and persistence
 
-OpenAI's [GPT-5.6 subscription update](https://x.com/thsottiaux/status/2076495156757577895)
-sets the ChatGPT context limit to 272K tokens. Set
-`CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000` with `gpt-5.6-sol[1m]` so Claude Code
-compacts before the upstream limit.
+Start with a process-scoped launch. Persistent settings are optional and affect
+other Claude Code sessions; this project does not change them automatically.
+If you elect to persist routing, keep only the intended client variables and
+remove conflicting credential overrides yourself. Restart the client after
+changing its launch environment.
 
-Grok 4.5 and Grok 4.6 are 500,000 tokens. Set `CLAUDE_CODE_MAX_CONTEXT_TOKENS=500000` and omit `[1m]`.
-
-For a provider and model with a different real context limit, choose a safe value or omit the override. `DISABLE_AUTO_COMPACT=1` disables automatic compaction while preserving manual `/compact`, but the session can then hit the upstream limit.
-
-## Persistent Claude Code settings
-
-If every Claude Code session should use the proxy, put client variables in `~/.claude/settings.json`:
-
-```json
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "http://127.0.0.1:18765",
-    "ANTHROPIC_AUTH_TOKEN": "unused",
-    "ANTHROPIC_MODEL": "gpt-6-sol[1m]",
-    "ANTHROPIC_SMALL_FAST_MODEL": "gpt-6-luna[1m]",
-    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": 272000,
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1,
-    "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK": 1
-  }
-}
-```
-
-Use process-level variables or a wrapper when you also launch Claude Code directly against Anthropic. See [Switching models and backends](/using/switching-models-and-backends/).
-
-## Proxy settings are separate
-
-`CCP_*`, `PORT`, and `config.json` configure the **claude-code-proxy server process**. They control the listener, provider endpoints, transport, credentials, and diagnostics. They do not belong in Claude Code's client environment unless the same shell also starts the proxy.
-
-See [Configuration](/reference/configuration/) for the canonical server setting table.
+`CCP_*`, `PORT` and proxy `config.json` apply to the server.
+For example, `{"aliasProvider":"anthropic"}` in the proxy configuration enables
+dual mode persistently. See [Configuration](/reference/configuration/).

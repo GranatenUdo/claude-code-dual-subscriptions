@@ -3,11 +3,13 @@ title: OpenCode Go
 description: Configure an OpenCode Go API key, model routing, streaming, tools, and provider overrides.
 ---
 
+This inherited provider is retained alongside the dual Claude/Codex workflow. This fork has not performed live account testing; see [development status](/reference/development-status/) and use the [dual-mode client setup](/using/configure-claude-code/).
+
 OpenCode Go uses the API at `https://opencode.ai/zen/go/v1`. Its catalog spans
 OpenAI-compatible chat completions, Anthropic-compatible messages, and OpenAI
 Responses; the proxy selects the wire protocol for each registered model. Each
 mapping comes from the [official OpenCode Go endpoint table](https://opencode.ai/docs/go/#endpoints)
-or direct protocol verification against the API.
+or upstream protocol work. This fork has not repeated live API verification.
 
 ## Account and authentication
 
@@ -15,7 +17,7 @@ Subscribe to OpenCode Go, copy your API key, and provide it to the proxy:
 
 ```sh
 export OPENCODE_API_KEY=YOUR_OPENCODE_GO_API_KEY
-claude-code-proxy serve
+CCP_ALIAS_PROVIDER=anthropic claude-code-proxy serve
 ```
 
 `CCP_OPENCODE_API_KEY` takes precedence over `OPENCODE_API_KEY`. The
@@ -25,7 +27,7 @@ implement an OpenCode login flow.
 ## Models
 
 Run `claude-code-proxy models` for the statically registered catalog. Every
-registered model has a provider-qualified form. Bare IDs are also accepted when
+registered model has a provider-qualified form. Use the [dual-mode client launch](/using/configure-claude-code/) before selecting it. Bare IDs are also accepted when
 they do not belong to another provider:
 
 ```sh
@@ -56,6 +58,6 @@ locally and does not send that request to OpenCode Go.
 - `CCP_OPENCODE_BASE_URL` or `opencode.baseUrl` changes the API base URL.
 
 OpenCode Go may expose additional model IDs through `/models`, but the proxy
-registers only models whose wire protocol is documented or has been verified
+registers only models whose wire protocol is documented or was verified by upstream
 against the live API. Unknown IDs are rejected locally. Access or usage-limit
 errors for registered models are surfaced from OpenCode.

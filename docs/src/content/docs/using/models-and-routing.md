@@ -3,28 +3,30 @@ title: Models and routing
 description: Understand provider model patterns, aliases, Codex fast mode, context hints, small models, model listing, and Claude Code gateway discovery.
 ---
 
-The model ID in each request selects its provider. One proxy listener can serve every provider through Anthropic Messages and the enabled OpenAI-compatible routes.
+The model ID in each request selects its provider. For dual subscriptions explicitly set `CCP_ALIAS_PROVIDER=anthropic`. Native Claude is available only through the Anthropic Messages and token-count routes, not the OpenAI-compatible routes.
 
 ## Routing patterns
 
 | Pattern | Provider |
 | --- | --- |
 | Registered `gpt-*` IDs and their `-fast` and `-ultrafast` forms | Codex |
-| `kimi-for-coding`, `kimi-k2.6`, `k2.6` | Kimi |
-| `grok-composer-2.5-fast`, `grok-4.5`, `grok-4.6` | Grok |
+| `kimi-for-coding`, `kimi-k2.6`, `k2.6`, `kimi-k3`, `k3` | Kimi |
+| `grok-composer-2.5-fast`, `grok-4.5`, `grok-4.6`, `grok-4.7` | Grok |
 | Non-conflicting registered OpenCode Go IDs and every `opencode-go/<model-id>` | OpenCode Go |
 | `cursor`, Cursor legacy aliases, `cursor:<id>`, `cursor-plan:<id>`, `cursor-ask:<id>` | Cursor Agent |
-| Anthropic-style aliases such as `haiku`, `sonnet`, `opus`, `fable`, and registered `claude-*` aliases | The `aliasProvider`, Codex by default |
+| Anthropic-style aliases such as `haiku`, `sonnet`, `opus`, `fable`, and registered `claude-*` aliases | Anthropic in dual mode; legacy built-in default is Codex |
 
-An unknown ID returns HTTP 400 with the supported provider catalog. There is no implicit fallback for arbitrary model names.
+In dual mode, any `claude-*` ID is forwarded to Anthropic for validation. Other unknown IDs return HTTP 400 with the supported provider catalog. There is no implicit fallback for arbitrary model names.
 
-## Prefer the live catalog
+Native short aliases resolve as follows: `haiku` → `claude-haiku-4-5`, `sonnet` → `claude-sonnet-5`, `opus` → `claude-opus-5`, `fable` → `claude-fable-5`. Native Claude also bypasses auto-review overrides.
+
+## Prefer the local catalog
 
 The model list changes faster than documentation. Ask the installed CLI:
 
 ```sh
-claude-code-proxy models
-claude-code-proxy models --full
+CCP_ALIAS_PROVIDER=anthropic claude-code-proxy models
+CCP_ALIAS_PROVIDER=anthropic claude-code-proxy models --full
 ```
 
 The compact command abbreviates Cursor's dynamic aliases. `--full` prints every alias discovered through the installed Cursor Agent catalog.
@@ -52,8 +54,8 @@ A trailing `[1m]` affects Claude Code's local compaction policy. The proxy strip
 Set both model variables to routable IDs:
 
 ```sh
-ANTHROPIC_MODEL=gpt-6-sol[1m]
-ANTHROPIC_SMALL_FAST_MODEL=gpt-6-luna[1m]
+ANTHROPIC_MODEL=claude-opus-5
+ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4-5
 ```
 
 Claude Code sends background work to its small/fast model. Its built-in Haiku ID can route through `aliasProvider`, but a concrete provider ID keeps the behavior explicit.
@@ -73,18 +75,18 @@ A model change can switch upstream providers because routing is per request. It 
 Enable Claude Code discovery at process start:
 
 ```sh
+env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY \
 CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 \
 ANTHROPIC_BASE_URL=http://127.0.0.1:18765 \
-ANTHROPIC_AUTH_TOKEN=unused \
-ANTHROPIC_MODEL=gpt-6-sol[1m] \
-ANTHROPIC_SMALL_FAST_MODEL=gpt-6-luna[1m] \
+ANTHROPIC_MODEL=claude-opus-5 \
+ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4-5 \
   claude
 ```
 
-`/v1/models` includes raw provider IDs and Anthropic-style aliases. Claude Code's gateway picker filters for IDs beginning with `claude` or `anthropic`, so configured aliases are the entries most likely to appear. Raw IDs remain usable through `--model`, `/model`, and environment variables.
+`/v1/models` includes raw provider IDs and Anthropic-style aliases. Picker behavior depends on the Claude Code version; discovery does not prove live account access. Raw IDs remain usable through `--model`, `/model`, and environment variables.
 
 ## Alias routing
 
-`CCP_ALIAS_PROVIDER=kimi` or `"aliasProvider": "kimi"` routes recognized Anthropic-style aliases to Kimi. Accepted values are `codex`, `kimi`, and `anthropic`. Explicit provider IDs always use their provider.
+`CCP_ALIAS_PROVIDER=kimi` or `"aliasProvider": "kimi"` routes recognized Anthropic-style aliases to Kimi. Accepted values are `codex`, `kimi`, and `anthropic`. Registered Claude IDs are also legacy aliases when native mode is not enabled. Explicit GPT and other provider IDs retain their provider.
 
 With `anthropic`, Claude aliases and explicit `claude-*` IDs go to [Anthropic](/providers/anthropic/) using the credentials Claude Code sends. They remain on Anthropic even after a GPT or Kimi turn establishes session affinity. Existing `codex` and `kimi` alias behavior is unchanged.

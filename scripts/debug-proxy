@@ -3,16 +3,16 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Start an isolated claude-code-proxy debugging instance on a random localhost port.
+Start a dual-subscription claude-code-proxy debugging instance with isolated logs on a random localhost port.
 
 Usage:
   scripts/debug-proxy
   scripts/debug-proxy --help
 
 Prerequisites:
-  - Run from a checkout of claude-code-proxy.
-  - Install cargo, curl, and the upstream provider credentials you need.
-  - Authenticate providers with the normal `claude-code-proxy <provider> auth`
+  - Run from a checkout of claude-code-dual-subscriptions.
+  - Install cargo and curl. Keep Claude Code signed in through its own login.
+  - Authenticate Codex and other translating providers with `claude-code-proxy <provider> auth`
     commands. This helper reads the normal config directory, so existing logins
     remain available.
 
@@ -24,7 +24,7 @@ health endpoint responds, and enables:
   - an isolated XDG state directory under the system temporary directory
 
 It prints a client.env path for another shell, exact log and capture paths, and
-example Claude Code model settings. Keep the launching shell open. Press Ctrl-C
+example Claude Code model settings. Those client commands can make live requests. Keep the launching shell open. Press Ctrl-C
 to stop the proxy. The temporary directory remains available for investigation.
 
 Traffic captures preserve prompt and tool content. Treat the artifact directory
@@ -71,12 +71,13 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 cd "$repo_root"
-cargo build --quiet --bin claude-code-proxy
+cargo build --locked --quiet --bin claude-code-proxy
 
 for _attempt in {1..20}; do
   proxy_port=$((49152 + (RANDOM % 16384)))
   : > "$server_log"
 
+  CCP_ALIAS_PROVIDER=anthropic \
   XDG_STATE_HOME="$state_home" \
   CCP_LOG_STDERR=1 \
   CCP_LOG_VERBOSE=1 \
@@ -117,7 +118,8 @@ fi
 
 cat > "$client_env" <<EOF
 export ANTHROPIC_BASE_URL=http://127.0.0.1:$proxy_port
-export ANTHROPIC_AUTH_TOKEN=unused
+unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY
+# Settings-file credentials and apiKeyHelper can still override the Claude login.
 EOF
 chmod 600 "$client_env"
 
@@ -127,8 +129,8 @@ PID: $proxy_pid
 
 In another shell, load the proxy endpoint and choose models:
   source "$client_env"
-  export ANTHROPIC_MODEL='gpt-5.6-sol[1m]'
-  export ANTHROPIC_SMALL_FAST_MODEL='gpt-5.6-luna[1m]'
+  export ANTHROPIC_MODEL='claude-opus-5'
+  export ANTHROPIC_SMALL_FAST_MODEL='claude-haiku-4-5'
   claude
 
 Live process output:

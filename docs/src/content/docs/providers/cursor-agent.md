@@ -3,6 +3,8 @@ title: Cursor Agent
 description: Configure Cursor authentication, dynamic models, plan and ask modes, effort variants, images, session continuation, tool bridging, and protobuf discovery.
 ---
 
+This inherited provider is retained alongside the dual Claude/Codex workflow. This fork has not performed live account testing; see [development status](/reference/development-status/) and use the [dual-mode client setup](/using/configure-claude-code/).
+
 Cursor uses Cursor Agent's HTTP/2 full-duplex Connect protocol at `https://api2.cursor.sh/agent.v1.AgentService/Run`.
 
 ## Account and authentication

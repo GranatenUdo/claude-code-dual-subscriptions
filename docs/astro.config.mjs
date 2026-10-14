@@ -4,11 +4,12 @@ import starlight from '@astrojs/starlight';
 import starlightLlmsTxt from 'starlight-llms-txt';
 
 export default defineConfig({
-  site: 'https://claude-code-proxy.raine.dev',
+  // Local preview only; no public docs deployment is configured.
+  site: 'http://localhost:4321',
   integrations: [
     starlight({
-      title: 'claude-code-proxy',
-      description: 'Run Claude Code with Codex, Kimi, Grok, OpenCode Go, or Cursor Agent.',
+      title: 'Claude Code Dual Subscriptions',
+      description: 'Development fork for native Claude and separate Codex subscription routing.',
       plugins: [starlightLlmsTxt()],
       favicon: '/favicon.svg',
       head: [
@@ -24,7 +25,7 @@ export default defineConfig({
         {
           icon: 'github',
           label: 'GitHub',
-          href: 'https://github.com/raine/claude-code-proxy',
+          href: 'https://github.com/GranatenUdo/claude-code-dual-subscriptions',
         },
       ],
       components: {
@@ -35,8 +36,9 @@ export default defineConfig({
         {
           label: 'Start here',
           items: [
-            { label: 'What is claude-code-proxy?', link: '/' },
+            { label: 'Dual subscriptions', link: '/' },
             { label: 'Getting started', slug: 'getting-started' },
+            { label: 'Development status', slug: 'reference/development-status' },
             { label: 'How it works', slug: 'how-it-works' },
           ],
         },

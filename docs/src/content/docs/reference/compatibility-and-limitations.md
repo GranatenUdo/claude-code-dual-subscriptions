@@ -5,10 +5,16 @@ description: Canonical security, account, protocol, model, context, multimodal, 
 
 claude-code-proxy targets Claude Code's practical Anthropic API usage rather than complete protocol equivalence.
 
+## Fork validation and distribution
+
+The Linux/WSL build, formatting, strict lint and 1,136 local tests passed. Live subscriptions and native Windows/macOS builds remain unverified. No fork binary releases or hosted documentation exist. See [Development status](/reference/development-status/).
+
+The inherited `lru 0.12.5` dependency is affected by RUSTSEC-2026-0002 and RUSTSEC-2026-0253. Ratatui 0.29 excludes the patched versions; this remains unresolved.
+
 ## Accounts and provider policy
 
 - Provider subscriptions, allowed models, regions, quotas, and enforcement remain under each provider's control.
-- OpenAI has publicly welcomed using Codex through other coding harnesses, but public statements do not guarantee future policy or account treatment.
+- Anthropic does not officially support non-Claude routing through Claude Code. Local protocol tests do not verify live subscription acceptance.
 - Kimi, Grok, and Cursor use unofficial client integrations. Review the terms and account risk for your use.
 - Upstream rate limits are shared with other clients on the same account.
 
@@ -23,9 +29,9 @@ claude-code-proxy targets Claude Code's practical Anthropic API usage rather tha
 
 - Messages supports streaming and non-streaming responses for the fields exercised by Claude Code.
 - `?beta=true` does not select a separate implementation.
-- Token counts are local estimates, not exact upstream tokenizer or billing counts.
+- Native Claude token counts come from Anthropic; translating-provider counts are local estimates, not billing counts.
 - Claude Code title generation and other structured background requests are forwarded and consume provider tokens.
-- Anthropic-specific fields without a provider mapping can be dropped.
+- Translating providers may omit fields with no mapping. Native Claude preserves original unknown fields, signed thinking and native errors.
 - Native OpenAI Responses passthrough is opt-in and applies to registered Codex models.
 - Codex Images passthrough is separately opt-in, restricted to `gpt-image-2`, and supports generation plus JSON or multipart edits. Variations, masks, remote image URLs, and URL-formatted outputs are unsupported.
 
@@ -41,8 +47,8 @@ claude-code-proxy targets Claude Code's practical Anthropic API usage rather tha
 ## Models and context
 
 - Local registration does not guarantee account access to a model.
-- Unknown model IDs have no implicit provider fallback.
-- Anthropic-style aliases route only to the configured Codex or Kimi alias provider.
+- Unknown IDs have no implicit fallback, except that dual mode forwards new `claude-*` IDs to Anthropic for validation.
+- With `aliasProvider=anthropic`, aliases and any `claude-*` ID route to Anthropic, regardless of preceding provider affinity. The legacy `codex` and `kimi` modes retain their existing behavior.
 - `[1m]` is a Claude Code client hint and does not change upstream context.
 - Provider context limits can be lower than Claude Code's local threshold.
 - Switching provider or model can clear provider-specific continuation assumptions while Claude Code retains portable history.
@@ -85,7 +91,7 @@ claude-code-proxy targets Claude Code's practical Anthropic API usage rather tha
 ## Diagnostics and privacy
 
 - Structured logs redact known credential keys, but user-provided strings can still contain secrets.
-- Error captures contain complete redacted failed responses.
+- Translating-provider error captures contain redacted failed responses. Native Anthropic errors are streamed without that persistent body-capture path.
 - Traffic captures intentionally preserve prompts and tool content for message/Responses diagnostics.
 - Image generation and edit routes never create traffic captures or persist prompts, uploads, data URLs, generated base64, or upstream error bodies.
 - Verbose logging and traffic capture should be scoped to a focused local investigation.

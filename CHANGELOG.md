@@ -1,7 +1,13 @@
 ---
 title: Changelog
-description: Release notes for claude-code-proxy.
+description: Fork development notes and retained upstream release history.
 ---
+
+## Fork development (unreleased)
+
+Native Claude subscription passthrough and separate Codex OAuth can share one Claude Code session in opt-in Anthropic alias mode. Mock validation passed; live subscription testing remains outstanding. This fork has no published releases. Build from this repository's source.
+
+Documentation now describes dual authentication, native routing, mixed-history limits and local-only documentation. Promotional material has been removed. The following versioned entries are retained upstream history; their release references belong to the original project.
 
 ## v0.1.45 (2026-10-10)
 
@@ -238,7 +244,7 @@ description: Release notes for claude-code-proxy.
   ([#79](https://github.com/raine/claude-code-proxy/pull/79))
 - The monitor shows active native Codex compaction requests with a dedicated
   `compacting` status.
-- The new [documentation site](https://claude-code-proxy.raine.dev) provides
+- The upstream documentation site introduced in this release provided
   setup guides, provider details, configuration references, troubleshooting,
   and an `llms.txt` version for coding agents.
 

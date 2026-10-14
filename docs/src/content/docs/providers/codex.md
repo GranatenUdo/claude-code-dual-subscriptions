@@ -5,11 +5,7 @@ description: Configure ChatGPT Codex authentication, models, reasoning, tools, i
 
 Codex uses the ChatGPT subscription Responses endpoint at `https://chatgpt.com/backend-api/codex/responses`.
 
-OpenAI's Thibault Sottiaux has publicly welcomed using Codex through other coding
-harnesses:
-
-> [Share the recipe. People want to know how to use GPT-5.6 Sol in CC. We don't
-> discriminate on the harness.](https://x.com/thsottiaux/status/2075830097488249060)
+Use this alongside native Claude with `CCP_ALIAS_PROVIDER=anthropic`. The mock-tested routing keeps the credentials separate; live account use remains unverified.
 
 ## Account and authentication
 
@@ -26,9 +22,9 @@ The proxy owns its tokens and does not read native Codex CLI credentials. It ref
 
 ## Models and fast mode
 
-Use `claude-code-proxy models` as the current catalog. Model access depends on your ChatGPT account. A model rejected by the subscription produces the upstream error verbatim.
+Use `claude-code-proxy models` as the current catalog. Model access depends on your ChatGPT account. A model rejected by the subscription produces a mapped provider error; native byte-for-byte error preservation applies to the Anthropic passthrough route.
 
-Claude-style aliases map to Codex models: `haiku` and `claude-haiku-*` to `gpt-6-luna`, `sonnet` and `claude-sonnet-*` to `gpt-5.6-terra`, and `opus`, `fable`, `claude-opus-*` (including `claude-opus-5-5`), and `claude-fable-*` to `gpt-6-sol`.
+Only in legacy `aliasProvider=codex` mode (subject to session affinity), registered Claude-style aliases map to Codex models: `haiku` and `claude-haiku-*` to `gpt-6-luna`, `sonnet` and `claude-sonnet-*` to `gpt-5.6-terra`, and `opus`, `fable`, `claude-opus-*` (including `claude-opus-5-5`), and `claude-fable-*` to `gpt-6-sol`.
 
 Append `-fast` to any registered Codex model to request `service_tier: "priority"`. For example, `gpt-6-sol-fast` selects `gpt-6-sol` with fast service.
 
@@ -107,7 +103,7 @@ Server compaction is disabled by default. Enable it in `config.json`:
 Or enable it for one proxy process:
 
 ```sh
-CCP_CODEX_SERVER_COMPACTION=1 claude-code-proxy serve
+CCP_CODEX_SERVER_COMPACTION=1 CCP_ALIAS_PROVIDER=anthropic claude-code-proxy serve
 ```
 
 ### Fallbacks and visibility
@@ -129,7 +125,7 @@ The proxy replaces incoming credentials with stored Codex auth for both routes. 
 `CCP_CODEX_IMAGES_API=1` separately enables `POST /v1/images/generations` and `POST /v1/images/edits`. The routes reuse the proxy's stored ChatGPT OAuth session and target the ChatGPT Codex image backend; no OpenAI Platform API key is required.
 
 ```sh
-CCP_CODEX_IMAGES_API=1 claude-code-proxy serve
+CCP_CODEX_IMAGES_API=1 CCP_ALIAS_PROVIDER=anthropic claude-code-proxy serve
 ```
 
 The model defaults to and is restricted to `gpt-image-2`. Generation accepts JSON. Editing accepts either Codex JSON data URLs or OpenAI-style multipart uploads, which the proxy validates and converts into the Codex JSON contract. Results are returned as `data[].b64_json`. Masks, remote URLs, URL-formatted output, and image variations are not supported.

@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-proxy-docs",
+  "name": "claude-code-dual-subscriptions-docs",
   "version": "0.1.0",
   "private": true,
   "packageManager": "bun@1.3.13",
@@ -7,9 +7,10 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro build && cp dist/llms-full.txt dist/llms.txt",
+    "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "check:links": "node scripts/check-links.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.41.2",

@@ -3,6 +3,8 @@ title: Kimi
 description: Configure Kimi Code authentication, model aliases, reasoning effort, tools, images, video, token refresh, and provider settings.
 ---
 
+This inherited provider is retained alongside the dual Claude/Codex workflow. This fork has not performed live account testing; see [development status](/reference/development-status/) and use the [dual-mode client setup](/using/configure-claude-code/).
+
 Kimi uses the OpenAI-style chat completions endpoint at `https://api.kimi.com/coding/v1/chat/completions`.
 
 ## Account and authentication
@@ -18,7 +20,7 @@ The login prints a verification URL and user code, then polls until authorizatio
 
 ## Model selection
 
-The upstream wire model is `kimi-for-coding`, displayed by Kimi tooling as Kimi K2.6. The proxy also accepts `kimi-k2.6` and `k2.6` as aliases. Use `[1m]` as a Claude Code compaction hint only when the actual upstream context and your chosen threshold support it.
+The default Kimi wire model is `kimi-for-coding`. The registry also accepts `kimi-k2.6`, `k2.6`, `kimi-k3` and `k3`; use the CLI catalog for this build. Use `[1m]` as a Claude Code compaction hint only when the actual upstream context and your chosen threshold support it.
 
 ```sh
 ANTHROPIC_MODEL=kimi-for-coding[1m]

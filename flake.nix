@@ -29,7 +29,7 @@
 
             meta = with pkgs.lib; {
               description = cargoToml.package.description;
-              homepage = "https://github.com/raine/claude-code-proxy";
+              homepage = "https://github.com/GranatenUdo/claude-code-dual-subscriptions";
               license = licenses.mit;
               mainProgram = "claude-code-proxy";
             };

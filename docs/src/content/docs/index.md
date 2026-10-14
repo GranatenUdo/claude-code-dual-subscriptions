@@ -1,40 +1,41 @@
 ---
-title: What is claude-code-proxy?
-description: Run Claude Code with Codex, Kimi, Grok, OpenCode Go, or Cursor Agent through one local Anthropic-compatible proxy.
+title: Dual subscriptions for Claude Code
+description: Development documentation for native Claude OAuth passthrough alongside separate ChatGPT Codex OAuth.
 ---
 
-<div class="hero-copy">
-claude-code-proxy lets you use Claude Code with Codex, Kimi, Grok, OpenCode Go, or Cursor Agent. Start one local app, choose a model, and keep working in the Claude Code interface you already know.
-</div>
+**claude-code-dual-subscriptions** is a development fork of
+[raine/claude-code-proxy](https://github.com/raine/claude-code-proxy).
+The executable remains `claude-code-proxy`.
 
-<div class="route-rail" aria-label="Claude Code connects through the proxy to a supported provider">
-  <div class="route-node route-client">
-    <span class="route-kicker">Your coding interface</span>
-    <strong>Claude Code</strong>
-  </div>
-  <div class="route-connector" aria-hidden="true"><span>→</span></div>
-  <div class="route-node route-proxy">
-    <span class="route-kicker">Local bridge</span>
-    <strong>claude-code-proxy</strong>
-    <span>Chooses the provider from your model</span>
-  </div>
-  <div class="route-connector" aria-hidden="true"><span>→</span></div>
-  <div class="route-node route-providers">
-    <span class="route-kicker">Supported providers</span>
-    <div class="provider-stack"><span>Codex</span><span>Kimi</span><span>Grok</span><span>OpenCode Go</span><span>Cursor Agent</span></div>
-  </div>
-</div>
+One local listener can route native Claude requests with the credentials supplied
+by Claude Code, and GPT requests with the proxy's separate Codex subscription login.
+Enable `CCP_ALIAS_PROVIDER=anthropic` before starting the proxy, then select models
+in a single Claude Code session.
 
-## Why use it?
+## Development status
 
-- **Keep the Claude Code experience.** Skills, tools, hooks, subagents, IDE integrations, and the terminal interface stay on the client side.
-- **Use subscription-backed providers.** Authenticate with supported consumer accounts instead of putting provider API keys into Claude Code.
-- **Switch providers by model.** A single proxy process routes every request from its model ID.
-- **Use Claude Code normally.** Tools and streaming are translated across providers; images and reasoning depend on the selected provider and model.
-- **See what is happening.** The monitor TUI shows sessions, requests, errors, models, token use, and throughput. Structured logs and optional traffic captures support deeper diagnosis.
+The implementation passed 1,136 local tests, including eight Anthropic mock
+integration tests, plus formatting, strict lint and a Linux/WSL build.
+**Live subscription switching is unverified.** Non-Claude routing is not
+officially supported by Anthropic. The inherited `lru 0.12.5` advisories remain
+unresolved; see [limitations](/reference/compatibility-and-limitations/).
 
-![Claude Code running through claude-code-proxy](/claude-code-screenshot.webp)
+No fork release binaries or hosted docs site exist. These pages are repository
+source and a local preview. Follow [Getting started](/getting-started/) to build
+the actual fork from source rather than installing upstream.
 
-## Next steps
+## Authentication and routing
 
-Start with the [short Codex setup](/getting-started/), compare the [supported providers](/providers/choosing-a-provider/), or read [how requests flow](/how-it-works/).
+- Claude Code owns Anthropic login and refresh. The proxy preserves its OAuth,
+  beta and version headers and native response bytes.
+- Codex uses the proxy's own ChatGPT OAuth store. Anthropic credentials are
+  discarded before dispatch to translating providers.
+- Native Claude model selection takes priority over session affinity and
+  auto-review overrides.
+- Native signed thinking stays intact. Visible foreign reasoning becomes text;
+  opaque reasoning is not transferable across providers.
+- Kimi, Grok, OpenCode Go and Cursor guides remain available as inherited features.
+
+Continue with [configuration](/using/configure-claude-code/),
+[model switching](/using/switching-models-and-backends/), or
+[request flow](/how-it-works/).

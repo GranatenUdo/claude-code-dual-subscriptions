@@ -21,7 +21,11 @@ Windows falls back to `%USERPROFILE%/AppData/Roaming` and `%USERPROFILE%/AppData
 
 `config.json` lives directly under the configuration root. See [Configuration](/reference/configuration/) for its schema and precedence.
 
-## Provider credentials
+## Anthropic credentials
+
+Claude Code owns its saved claude.ai login and refresh. This proxy only forwards request headers to Anthropic; it does not read a Claude keychain, store a token, or add an Anthropic auth file.
+
+## Other provider credentials
 
 On macOS, Codex and Cursor use Keychain services:
 
@@ -49,11 +53,11 @@ Kimi stores a persistent UUID at `<configuration-root>/kimi/device_id` for file-
 
 `proxy.log` lives under the state root. It uses JSON Lines and rotates at 20 MiB. Known credential keys, including authorization, access tokens, refresh tokens, ID tokens, and account headers, are redacted before writing.
 
-A Homebrew service also writes `service.log` under the state root.
+This fork provides no Homebrew service. A manually configured service manager owns its output log location.
 
 ## Failed responses
 
-`errors/` under the state root contains JSON files for failed proxy responses. A `request_failed` log event includes `errorFile`, which points to the complete redacted payload.
+`errors/` under the state root contains JSON files for captured failures from translating providers. Native Anthropic response bodies are streamed directly and do not use this buffering/capture path. A `request_failed` log event includes `errorFile`, which points to the complete redacted payload.
 
 Error payloads are safer to share than raw traffic captures, but inspect their prompt-derived content and paths before publishing them.
 

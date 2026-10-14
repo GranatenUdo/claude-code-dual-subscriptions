@@ -3,6 +3,8 @@ title: Grok
 description: Configure grok.com authentication, Grok models, reasoning, function tools, hosted web and X search, citations, and provider overrides.
 ---
 
+This inherited provider is retained alongside the dual Claude/Codex workflow. This fork has not performed live account testing; see [development status](/reference/development-status/) and use the [dual-mode client setup](/using/configure-claude-code/).
+
 Grok uses the Responses endpoint at `https://cli-chat-proxy.grok.com/v1/responses`.
 
 ## Account and authentication
@@ -24,7 +26,7 @@ The proxy owns and refreshes its Grok tokens. It does not read `~/.grok/auth.jso
 
 ## Models
 
-The registered IDs are `grok-composer-2.5-fast`, `grok-4.5`, and `grok-4.6`. Account and regional access can vary. Use the same concrete Grok ID for `ANTHROPIC_MODEL` and `ANTHROPIC_SMALL_FAST_MODEL`.
+The registered IDs are `grok-composer-2.5-fast`, `grok-4.5`, `grok-4.6`, and `grok-4.7`. Account and regional access can vary. After the [dual-mode client launch](/using/configure-claude-code/), use the same concrete Grok ID for `ANTHROPIC_MODEL` and `ANTHROPIC_SMALL_FAST_MODEL`.
 
 ```sh
 ANTHROPIC_MODEL=grok-4.6 \

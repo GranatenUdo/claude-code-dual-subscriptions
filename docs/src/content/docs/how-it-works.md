@@ -1,48 +1,30 @@
 ---
 title: How it works
-description: Follow authentication, routing, protocol translation, streaming, session state, and diagnostics through claude-code-proxy.
+description: Native Claude passthrough and separate Codex authentication in one session.
 ---
 
-claude-code-proxy exposes Anthropic Messages and optional OpenAI-compatible routes. Every route selects a provider from the request model and translates through that provider's native protocol.
+Start the proxy with `CCP_ALIAS_PROVIDER=anthropic`. Claude Code sends Messages requests to the loopback listener. Each request's model chooses a route.
 
-<div class="route-rail" aria-label="claude-code-proxy request architecture">
-  <div class="route-node"><strong>API client</strong><span>Anthropic Messages<br/>OpenAI Chat or Responses</span></div>
-  <div class="route-arrow" aria-hidden="true">→</div>
-  <div class="route-node"><strong>Proxy pipeline</strong><span>route model<br/>refresh auth<br/>translate events</span></div>
-  <div class="route-arrow" aria-hidden="true">→</div>
-  <div class="route-node provider-stack"><code>Codex Responses</code><code>Kimi Chat Completions</code><code>Grok Responses</code><code>OpenCode Chat / Messages / Responses</code><code>Cursor Connect</code></div>
-</div>
+## Native Claude route
 
-## Anthropic requests
+Real `claude-*` IDs and the built-in Claude aliases select the fixed `https://api.anthropic.com` upstream. Native selection takes precedence over session affinity and auto-review overrides. Claude Code supplies and refreshes its saved subscription OAuth login; the proxy forwards the original authentication, version and beta headers. It does not read or store Anthropic credentials.
 
-1. Claude Code sends an Anthropic Messages request to `/v1/messages`.
-2. The registry normalizes a trailing `[1m]`, resolves aliases, and selects a provider from the model ID.
-3. The provider loads its proxy-owned credential and refreshes an expiring access token when needed.
-4. The request translator maps system content, user and assistant messages, images, tools, tool results, thinking controls, and output settings into the upstream shape.
-5. The upstream stream is reduced into typed text, thinking, tool, usage, and completion events.
-6. The proxy emits Anthropic SSE events or accumulates a non-streaming Anthropic response.
-7. The monitor, JSONL logger, and optional traffic capture record operational details.
+Original request fields are preserved. Local aliases and context suffixes are resolved before forwarding. Native signed thinking is preserved; foreign visible reasoning is converted to text without inventing signatures. Responses retain native status codes, error bodies and streamed bytes. Redirects are disabled. Client cancellation closes the upstream stream.
 
-## OpenAI-compatible requests
+Native `/v1/messages/count_tokens` requests go to Anthropic with the same authentication boundary. They are not local estimates.
 
-Enable the OpenAI routes to use `/v1/chat/completions` or `/v1/responses`. The `model` field chooses Codex, Kimi, Grok, OpenCode Go, or Cursor in the same way it does on `/v1/messages`.
+## Codex and other translating routes
 
-Codex Responses requests go directly to the native Codex API. The proxy translates other OpenAI requests to the selected provider and returns either Chat Completions or Responses output. Streaming and non-streaming requests use the same translation rules, and unsupported fields return an error instead of being ignored.
+Explicit GPT IDs select Codex using the proxy's separate Codex OAuth login. Incoming client headers and query credentials are discarded before translating-provider dispatch, so Claude credentials do not become Codex credentials. Other providers retain their existing independent login or configured API-key mechanisms.
 
-## Authentication boundary
+Translators map messages, tools and visible history into each provider's protocol and reconstruct Anthropic response events. Codex's own encrypted reasoning can replay on Codex turns; native Anthropic signatures and redacted thinking are not Codex reasoning. Translating providers use local token estimates rather than Anthropic's count endpoint.
 
-Each provider login belongs to claude-code-proxy. The proxy does not read native Codex, Grok, or Cursor Agent credentials. Credentials live in the platform credential store described in [Files and storage](/reference/files-and-storage/). OpenCode Go instead uses the configured subscription API key. Incoming `ANTHROPIC_AUTH_TOKEN` values are accepted for client compatibility and are not used as upstream credentials.
+## Sessions and API surfaces
 
-## Routing boundary
+Switch with `/model gpt-6-sol` and `/model claude-opus-5` after a completed turn. A GPT turn does not redirect a subsequent Claude alias away from Anthropic in dual mode. Unfinished tool exchanges can still be rejected by the receiving provider.
 
-Routing happens per request, not per server process or API surface. Codex IDs, Kimi IDs, Grok IDs, OpenCode Go IDs, Cursor prefixes, and configured Anthropic-style aliases can share one listener across `/v1/messages`, `/v1/chat/completions`, and `/v1/responses`. Unknown model IDs return HTTP 400 with the supported catalog.
+Session IDs support monitor grouping and provider continuity. Cursor conversation state and optional Codex response/compaction state remain in memory; restarting clears that state. Claude Code's conversation history remains available.
 
-## Session state
+Optional OpenAI-compatible endpoints serve translating providers. Native Anthropic passthrough is available only through the Messages and count-token endpoints. Unknown non-Claude models return a routing error; explicit new `claude-*` IDs can pass through without a catalog update.
 
-Claude Code sends `x-claude-code-session-id`. The proxy uses it for monitor grouping and provider features that need continuity. Cursor conversation IDs, optional Codex `previous_response_id`, and optional Codex server compaction state live in memory. A proxy restart clears that state and portable Claude Code history remains the fallback.
-
-## Count tokens
-
-`POST /v1/messages/count_tokens` stays local and does not make an upstream request. Codex uses `o200k_base` for text plus estimates for images, encrypted reasoning, and protocol framing. Other providers use their own local estimators. The result supports Claude Code's compaction decisions but is not a provider billing count.
-
-See [HTTP API](/reference/http-api/) for route contracts and [Compatibility and limitations](/reference/compatibility-and-limitations/) for translation boundaries.
+See [authentication](/using/configure-claude-code/), [HTTP contracts](/reference/http-api/) and [development limitations](/reference/development-status/). This architecture is mock-tested; live subscription switching remains unverified.

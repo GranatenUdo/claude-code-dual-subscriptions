@@ -3,13 +3,13 @@ title: Monitor TUI
 description: Use the claude-code-proxy monitor to inspect sessions, active and recent requests, providers, errors, token usage, throughput, and setup.
 ---
 
-`claude-code-proxy serve` opens the monitor when stdout is an interactive terminal. The same process runs the HTTP listener.
+`CCP_ALIAS_PROVIDER=anthropic claude-code-proxy serve` opens the monitor when stdout is an interactive terminal. The same process runs the HTTP listener.
 
 To run the proxy as a service and attach the dashboard separately:
 
 ```sh
 # Run this under your service manager, or leave it in another terminal.
-claude-code-proxy serve --no-monitor
+CCP_ALIAS_PROVIDER=anthropic claude-code-proxy serve --no-monitor
 
 # Attach from any terminal; repeat for additional dashboards.
 claude-code-proxy monitor
@@ -51,7 +51,7 @@ The request table changes columns as the terminal width changes.
 Use plain output when the process runs under a service manager, in CI, or through a pipe:
 
 ```sh
-claude-code-proxy serve --no-monitor
+CCP_ALIAS_PROVIDER=anthropic claude-code-proxy serve --no-monitor
 ```
 
 Non-terminal stdout also selects plain mode. `CCP_LOG_STDERR=1` mirrors JSONL log events to stderr in plain mode.
@@ -70,13 +70,7 @@ The deterministic simulation covers active, successful, and failed requests acro
 
 ## Background service
 
-A Homebrew installation can run at login:
-
-```sh
-brew services start claude-code-proxy
-```
-
-Service output lives in `~/.local/state/claude-code-proxy/service.log` on macOS and Linux. The structured `proxy.log` shares the state directory. Provider login remains an interactive one-time command.
+This fork has no Homebrew formula or packaged service. Run the source-built binary with `CCP_ALIAS_PROVIDER=anthropic` and `serve --no-monitor` in a dedicated terminal, or configure your own service manager explicitly. Its environment must preserve dual mode. The service manager determines stdout/stderr log paths; structured `proxy.log` uses the state directory. Claude authentication remains owned by the client.
 
 Run `claude-code-proxy monitor` to inspect that service. The monitor endpoint only accepts loopback connections, even if the inference listener binds a LAN address. For a service on another machine, forward its port with SSH and point `monitor --url` at the local end of the tunnel.
 

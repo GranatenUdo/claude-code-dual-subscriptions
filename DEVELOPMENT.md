@@ -41,3 +41,11 @@ Linux/WSL is used for validation; this does not certify a Windows build.
 Switch only after a completed tool-use turn. Account access, upstream history
 validation, token refresh, and live model switching still require separately
 approved live testing. Non-Claude routing is not officially supported by Anthropic.
+
+## Distribution and documentation
+
+No fork releases or hosted documentation are published. Use the Linux/WSL source-build instructions in [README.md](README.md). The binary name remains `claude-code-proxy`.
+
+To validate docs: `cd docs`, `bun install --frozen-lockfile`, `bun run build`, then `bun run check:links`. `bun run dev` starts the local preview. Documentation CI is build-only.
+
+Inherited LRU advisories remain unresolved; see [DEPENDENCY-REVIEW.md](DEPENDENCY-REVIEW.md).

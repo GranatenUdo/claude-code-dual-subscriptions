@@ -9,52 +9,17 @@ These settings configure the proxy process. Claude Code client settings such as 
 
 ## Example `config.json`
 
+Minimal dual-subscription configuration:
+
 ```json
 {
   "bindAddress": "127.0.0.1",
   "port": 18765,
-  "aliasProvider": "codex",
-  "autoReviewModel": "gpt-5.6-terra",
-  "codex": {
-    "originator": "claude-code-proxy",
-    "userAgent": "claude-code-proxy/0.1.24",
-    "model": "gpt-6-sol",
-    "effort": "high",
-    "reasoningSummary": "auto",
-    "serviceTier": "fast",
-    "baseUrl": "https://chatgpt.com/backend-api/codex/responses",
-    "transport": "websocket",
-    "headerTimeoutMs": 300000,
-    "previousResponseId": false,
-    "serverCompaction": false,
-    "responsesApi": false,
-    "imagesApi": false,
-    "imagesBaseUrl": "https://chatgpt.com/backend-api/codex"
-  },
-  "kimi": {
-    "userAgent": "KimiCLI/1.37.0",
-    "oauthHost": "https://auth.kimi.com",
-    "baseUrl": "https://api.kimi.com/coding/v1"
-  },
-  "grok": {
-    "baseUrl": "https://cli-chat-proxy.grok.com/v1",
-    "clientVersion": "0.2.93"
-  },
-  "opencode": {
-    "apiKey": "YOUR_OPENCODE_GO_API_KEY",
-    "baseUrl": "https://opencode.ai/zen/go/v1"
-  },
-  "cursor": {
-    "baseUrl": "https://api2.cursor.sh",
-    "clientVersion": "0.48.5",
-    "agentBundle": "/path/to/cursor-agent/index.js"
-  },
-  "log": {
-    "stderr": false,
-    "verbose": false
-  }
+  "aliasProvider": "anthropic"
 }
 ```
+
+The built-in alias default remains `codex`; this example intentionally opts into native Claude. There is no Anthropic credential-store setting or configurable native upstream URL. The tables below retain optional settings for other providers; add only the settings you need.
 
 All keys are optional. An unreadable file, malformed JSON, or incompatible field type causes the file configuration to be ignored and built-in or environment values to apply.
 
@@ -74,7 +39,7 @@ All keys are optional. An unreadable file, malformed JSON, or incompatible field
 
 `CCP_CONFIG_DIR` affects `config.json` and file-backed provider auth. It does not relocate the state directory.
 
-Codex auto-review classifier requests use `gpt-6-luna` by default. Requests routed through other providers retain their requested model. `CCP_AUTO_REVIEW_MODEL` or `autoReviewModel` selects an explicit registered model for all detected classifier requests without changing the session's provider affinity. Normal messages, streaming requests, tool-using requests, and token counting retain their requested model.
+Codex auto-review classifier requests use `gpt-6-luna` by default. Requests routed through other providers retain their requested model. `CCP_AUTO_REVIEW_MODEL` or `autoReviewModel` selects an explicit registered model for detected non-Anthropic classifier requests without changing the session's provider affinity. Native Anthropic requests always bypass auto-review overrides. Normal messages, streaming requests, tool-using requests, and token counting retain their requested model.
 
 ## Outbound proxies
 

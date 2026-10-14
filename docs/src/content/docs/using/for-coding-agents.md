@@ -1,79 +1,29 @@
 ---
 title: For coding agents
-description: Give coding agents machine-readable docs, model discovery, the minimal environment contract, authoritative references, diagnostics, and safe data-handling rules.
+description: Work on this development fork without changing account settings or exposing credentials.
 ---
 
-This site publishes machine-readable documentation for coding agents alongside the human pages.
+Use the [source-build quickstart](/getting-started/) and [development status](/reference/development-status/). Documentation is local and unhosted. A local build generates [the index](/llms.txt) and [assembled documentation](/llms-full.txt).
 
-## Machine-readable docs
+## Configuration contract
 
-- [`/llms.txt`](/llms.txt) is the compact index and is linked in the site header.
-- [`/llms-full.txt`](/llms-full.txt) contains the assembled documentation body for retrieval when the index is not enough.
+The proxy process needs `CCP_ALIAS_PROVIDER=anthropic` for dual mode. The built-in default remains `codex`. Client `ANTHROPIC_BASE_URL` selects the loopback proxy. Do not add dummy authentication values: `ANTHROPIC_AUTH_TOKEN`, API keys or an API-key helper can override Claude Code's subscription login. Settings-file environment entries may override shell values. See [authentication precedence](/using/configure-claude-code/).
 
-Start with `llms.txt`, follow only the pages relevant to the task, and prefer canonical reference pages over copied command tables in prompts or project notes.
+Claude Code owns Anthropic login and refresh. The proxy owns a separate Codex login. Never copy or edit the native Codex CLI credential store to configure this proxy.
 
-## Discover models at runtime
+Inspect models without making inference calls:
 
-The installed CLI and running server are authoritative for the active build:
+~~~sh
+CCP_ALIAS_PROVIDER=anthropic claude-code-proxy models
+CCP_ALIAS_PROVIDER=anthropic claude-code-proxy models --full
+~~~
 
-```sh
-claude-code-proxy models
-claude-code-proxy models --full
-curl -s http://127.0.0.1:18765/v1/models
-```
+Implementation and tests are authoritative: `src/config.rs`, `src/registry.rs`, `src/server.rs`, `src/providers/anthropic/` and `tests/`. Preserve original native fields, signed thinking, auth/beta/version headers, errors and streaming. Never fabricate reasoning signatures or forward incoming Anthropic credentials to translating providers.
 
-Use the compact CLI output for a provider overview. Use `--full` when a Cursor model alias must be resolved. Do not maintain an exhaustive model list in agent memory because provider catalogs and account access change.
+## Verification and diagnostics
 
-## Minimal environment contract
+Use isolated configuration and loopback mocks. Formatting, Clippy, build and test commands are in [development status](/reference/development-status/). Live inference, account login, normal-environment installation and settings changes require explicit authorization beyond repository development.
 
-To launch Claude Code through a running local proxy, set:
+The debug helper starts a local proxy and captures traffic; using its client instructions can make live requests. Run it only for an authorized investigation. Native errors stream through directly; do not assume every error has a saved payload. Other providers retain their diagnostic captures.
 
-```sh
-ANTHROPIC_BASE_URL=http://127.0.0.1:18765
-ANTHROPIC_AUTH_TOKEN=unused
-ANTHROPIC_MODEL=<routable-model-id>
-ANTHROPIC_SMALL_FAST_MODEL=<routable-model-id>
-CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1
-```
-
-`ANTHROPIC_*` and `CLAUDE_CODE_*` configure the Claude Code client. `CCP_*`, `PORT`, and `config.json` configure the proxy process. Keep those layers separate when editing settings or debugging a launch.
-
-## Authoritative references
-
-Use these pages for exact operational details:
-
-- [Command reference](/reference/command-reference/) for CLI syntax and exit behavior
-- [Configuration](/reference/configuration/) for keys, environment variables, precedence, and defaults
-- [Files and storage](/reference/files-and-storage/) for credential, log, error, and traffic paths
-- [HTTP API](/reference/http-api/) for local route contracts
-- [Compatibility and limitations](/reference/compatibility-and-limitations/) for translation boundaries
-- [Changelog](/reference/changelog/) for released behavior
-
-For a source checkout, implementation and tests are the final authority when documentation and behavior disagree. Relevant surfaces include `src/main.rs`, `src/config.rs`, `src/registry.rs`, `src/server.rs`, `src/paths.rs`, `src/providers/`, and integration tests under `tests/`.
-
-## Diagnostics workflow
-
-1. Check liveness with `curl http://127.0.0.1:18765/healthz`.
-2. Check the selected model with `claude-code-proxy models`.
-3. Check stored provider credentials with `<provider> auth status`. For OpenCode Go, inspect whether its API-key environment variable or config key is configured without printing the secret.
-4. Read the monitor request detail and structured `proxy.log`.
-5. Read the redacted payload under `errors/` for a failed response.
-6. Enable verbose logging or traffic capture only for a focused reproduction.
-
-A source checkout includes `./scripts/debug-proxy`, which starts an isolated proxy on a random loopback port and prints every artifact path.
-
-## Handle sensitive data safely
-
-<div class="security-callout">
-<strong>Prompts and traffic captures are sensitive.</strong> Traffic captures preserve inbound prompts, tool definitions, tool inputs, tool outputs, translated requests, and stream events. Redacted headers do not make that content safe to publish.
-</div>
-
-- Never print, commit, upload, or paste provider credentials, refresh tokens, session cookies, or account identifiers.
-- Treat Claude prompts, source excerpts, tool output, file paths, and traffic captures as user data.
-- Share the smallest redacted error payload that explains the failure.
-- Ask before sending diagnostics to an external service.
-- Keep traffic capture disabled outside a focused debugging session.
-- Delete sensitive temporary captures after the investigation.
-- Do not bind the unauthenticated listener beyond loopback without an access control layer.
-
-Structured logs redact known credential fields, but verbose values and prompts can still contain secrets supplied by the user or tools. Inspect before sharing.
+Prompts, tool inputs, file paths, captures and logs can contain private data even when known credential fields are redacted. Never publish credentials or unreviewed diagnostics. Keep the listener on loopback. Do not upload captures or alter external service settings without authorization.

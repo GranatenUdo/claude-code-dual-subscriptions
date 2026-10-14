@@ -1,81 +1,73 @@
 ---
 title: Switching models and backends
-description: Choose launch-time patterns for switching between claude-code-proxy and direct Anthropic, then switch routed models within a proxy session.
+description: Switch native Claude and Codex models in one session while retaining separate subscription credentials.
 ---
 
-Claude Code binds its base URL and client auth when the process starts. A **backend switch** needs a new Claude Code process. A **model switch** can stay in the same proxy-backed session because the proxy routes each request by model ID.
+The primary workflow keeps the client pointed at one local proxy. Changing a
+model can change the provider within that session; changing the base URL requires
+a new Claude Code process. Live switching is unverified; local tests exercise
+routing, authentication isolation and mixed history.
 
-| Goal | Pattern |
-| --- | --- |
-| Always use the proxy | Put client variables in `~/.claude/settings.json` |
-| Try one model once | Prefix `claude` with environment variables or use an alias |
-| Toggle between proxy and direct Anthropic | Use a launch wrapper controlled by a flag |
-| Stay on the proxy and change provider or model | Use `/model`, `--model`, or a new `ANTHROPIC_MODEL` |
-
-To use Claude and GPT in one proxy-backed session, enable [Anthropic passthrough](/providers/anthropic/) with `CCP_ALIAS_PROVIDER=anthropic`. Claude Code keeps its subscription login and `/model` selects the provider per request. Switching the base URL itself still requires a new Claude Code process.
-
-## One-shot aliases
+## Prepare once per proxy process
 
 ```sh
-alias csol='ANTHROPIC_BASE_URL=http://127.0.0.1:18765 ANTHROPIC_AUTH_TOKEN=unused ANTHROPIC_MODEL=gpt-6-sol[1m] ANTHROPIC_SMALL_FAST_MODEL=gpt-6-luna[1m] CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1 claude'
-alias cgrok='ANTHROPIC_BASE_URL=http://127.0.0.1:18765 ANTHROPIC_AUTH_TOKEN=unused ANTHROPIC_MODEL=grok-4.5 ANTHROPIC_SMALL_FAST_MODEL=grok-4.5 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1 claude'
+CCP_ALIAS_PROVIDER=anthropic claude-code-proxy serve
 ```
 
-These affect only the launched process.
+Claude Code must already have its own subscription login, and the proxy must have
+its separate Codex login. Use the [client launch](/using/configure-claude-code/)
+without a dummy auth token. Neither login replaces the other.
 
-## Flag-controlled wrapper
+## In-session switching
 
-Put a wrapper named `claude` ahead of the real binary on `PATH`. Set `REAL_CLAUDE` to a path that cannot resolve back to the wrapper.
-
-```bash
-#!/usr/bin/env bash
-# Route Claude Code through the proxy when the flag file exists.
-set -euo pipefail
-
-real_claude="${REAL_CLAUDE:-$HOME/.local/bin/claude-real}"
-flag="$HOME/.claude/claude-code-proxy-enabled"
-model_file="$HOME/.claude/claude-code-proxy-model"
-
-if [ -f "$flag" ]; then
-  model="gpt-6-sol[1m]"
-  [ ! -f "$model_file" ] || model="$(tr -d '[:space:]' <"$model_file")"
-
-  export ANTHROPIC_BASE_URL="http://127.0.0.1:18765"
-  export ANTHROPIC_AUTH_TOKEN="unused"
-  export ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-$model}"
-  export ANTHROPIC_SMALL_FAST_MODEL="${ANTHROPIC_SMALL_FAST_MODEL:-$model}"
-  export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-  export CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1
-fi
-
-exec "$real_claude" "$@"
-```
-
-Toggle it with ordinary file operations:
-
-```sh
-mkdir -p ~/.claude
-touch ~/.claude/claude-code-proxy-enabled
-printf '%s\n' 'kimi-for-coding[1m]' > ~/.claude/claude-code-proxy-model
-# Disable for future sessions
-rm ~/.claude/claude-code-proxy-enabled
-```
-
-New processes read the flag and model. Running processes retain their launch environment.
-
-## In-session model changes
-
-With the base URL already pointing to the proxy:
+After the current response and all tool results are complete:
 
 ```text
-/model gpt-6-sol-fast[1m]
-/model kimi-for-coding[1m]
-/model grok-4.5
-/model cursor:gpt-5.5
+/model gpt-6-sol
+/model claude-opus-5
+/model sonnet
 ```
 
-The provider changes with the model. Provider auth must already exist. Claude Code preserves one conversation, while provider-specific in-memory continuation can reset when the provider or model changes.
+With `aliasProvider=anthropic`, `sonnet` maps to `claude-sonnet-5`,
+`opus` to `claude-opus-5`, `haiku` to `claude-haiku-4-5`, and `fable`
+to `claude-fable-5`. Prefer explicit IDs when a different native version is
+required. Account access is separate from local registration.
 
-## Scope
+Claude aliases stay native even after a Codex or Kimi turn. Native Claude requests
+also bypass the proxy's auto-review model override. GPT models continue to use
+Codex. A fixed `ANTHROPIC_SMALL_FAST_MODEL` remains independent of these switches.
 
-claude-code-proxy does not provide a profile GUI, rewrite Claude Code settings, change base URLs in a running process, or configure Desktop and IDE launch environments. Use process environment, a wrapper, or a dedicated profile manager for those concerns.
+## Thinking and history
+
+The conversation remains in Claude Code. Native signed and redacted Anthropic
+thinking blocks retain their original contents and signatures. Visible foreign
+reasoning is converted to tagged text; the proxy never invents a signature.
+Opaque Codex replay stays Codex-specific, and Claude encrypted thinking is not
+sent as Codex reasoning.
+
+Switch only at completed tool-use boundaries. Provider history validation may
+still reject an unfinished or incompatible history. Context capacity can differ;
+compact first if the receiving model cannot fit the current transcript.
+Provider-specific in-memory continuation may reset on a switch or proxy restart.
+
+## Other providers
+
+After authenticating the corresponding proxy provider, explicit IDs remain
+available in dual mode:
+
+```text
+/model kimi-for-coding
+/model grok-4.7
+/model cursor:gpt-5.5
+/model opencode-go/glm-5.2
+```
+
+These are inherited capabilities, not live-tested promises from this fork.
+See [provider guides](/providers/choosing-a-provider/).
+
+## Direct Anthropic without the proxy
+
+Start a new Claude Code process without `ANTHROPIC_BASE_URL` and without gateway
+credential overrides, accounting for any settings-file values. In-session
+`/model` does not change the base URL. No wrapper or global settings modification
+is required for this fork's process-scoped quickstart.

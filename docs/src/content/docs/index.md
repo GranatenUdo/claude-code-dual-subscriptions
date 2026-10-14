@@ -16,7 +16,7 @@ in a single Claude Code session.
 
 The implementation passed 1,136 local tests, including eight Anthropic mock
 integration tests, plus formatting, strict lint and a Linux/WSL build.
-**Live subscription switching is unverified.** Non-Claude routing is not
+**Opus 5.5 parent + Astra subagent operation is user-confirmed on 2.1.299; broader live switching is unverified.** Non-Claude routing is not
 officially supported by Anthropic. The inherited `lru 0.12.5` advisories remain
 unresolved; see [limitations](/reference/compatibility-and-limitations/).
 
@@ -34,8 +34,11 @@ the actual fork from source rather than installing upstream.
   auto-review overrides.
 - Native signed thinking stays intact. Visible foreign reasoning becomes text;
   opaque reasoning is not transferable across providers.
-- Kimi, Grok, OpenCode Go and Cursor guides remain available as inherited features.
+- Kimi, OpenCode Go and Cursor guides remain available as inherited features.
 
 Continue with [configuration](/using/configure-claude-code/),
 [model switching](/using/switching-models-and-backends/), or
 [request flow](/how-it-works/).
+## Confirmed parent/subagent setup
+
+The user confirmed Opus 5.5 parent + `gpt-6-astra[1m]` general-purpose operation on Claude Code 2.1.299 after restarting through the same proxy-enabled launcher. See [setup, model precedence, context limits and verification](/using/subagents/). This is a limited real-use confirmation; broader live regression remains outstanding.

@@ -4,7 +4,7 @@ description: Build this fork on Linux and prepare one Claude Code session for na
 ---
 
 This is the primary development workflow for **claude-code-dual-subscriptions**.
-It has been tested with local mock servers; live account switching is unverified.
+Local mock tests passed. The user also confirmed Opus 5.5 parent + Astra subagent operation on Claude Code 2.1.299; broader live switching remains unverified.
 The commands below are for a user choosing to perform live testing. Other
 providers remain available in [their guides](/providers/choosing-a-provider/).
 
@@ -70,21 +70,24 @@ env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY \
   ANTHROPIC_BASE_URL=http://127.0.0.1:18765 \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
   CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1 \
-  claude --model claude-opus-5
+  claude --model claude-opus-5-5
 ```
 
 Settings-file environment variables and credential helpers can still override
 the saved login. Review them without printing secrets. This guide does not
 require changing your global Claude settings.
 
-## 6. Switch after a completed turn
+## 6. Configure Astra subagents
+
+Follow [Opus parent and Astra subagents](/using/subagents/): merge `CLAUDE_CODE_SUBAGENT_MODEL=gpt-6-astra[1m]` into project-local settings, restart through the same proxy-enabled launcher, and invoke general-purpose without a per-call model argument. The user confirmed this sequence works.
+
+## 7. Optional parent-model switching
 
 ```text
-/model gpt-6-sol
-/model claude-opus-5
+/model gpt-6-astra[1m]
+/model claude-opus-5-5
 ```
 
 These IDs are recognized by this build; registration does not guarantee account
 access. Read [switching and history](/using/switching-models-and-backends/).
-Do not apply a one-million-token context hint indiscriminately across providers.
-No fixed cross-provider context limit is asserted by this quickstart.
+The Astra example deliberately includes `[1m]` at launch/selection time for the client context setting. Read [context policy and capacity limits](/using/models-and-routing/#the-1m-hint); the successful subagent probe did not test a million-token request.

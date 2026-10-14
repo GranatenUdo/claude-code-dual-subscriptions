@@ -5,9 +5,9 @@ description: Fork development notes and retained upstream release history.
 
 ## Fork development (unreleased)
 
-Native Claude subscription passthrough and separate Codex OAuth can share one Claude Code session in opt-in Anthropic alias mode. Mock validation passed; live subscription testing remains outstanding. This fork has no published releases. Build from this repository's source.
+Native Claude subscription passthrough and separate Codex OAuth can share one Claude Code session in opt-in Anthropic alias mode. Mock validation passed; the user confirmed Opus 5.5 parent + Astra subagent operation on Claude Code 2.1.299. Broader live validation remains outstanding. This fork has no published releases. Build from this repository's source.
 
-Documentation now describes dual authentication, native routing, mixed-history limits and local-only documentation. Promotional material has been removed. The following versioned entries are retained upstream history; their release references belong to the original project.
+Documentation now describes dual authentication, native routing, mixed-history limits and local-only documentation. Promotional material has been removed. The following versioned entries are selected upstream history (complete original notes remain in Git history); their release references belong to the original project.
 
 ## v0.1.45 (2026-10-10)
 
@@ -39,9 +39,6 @@ Documentation now describes dual authentication, native routing, mixed-history l
   Haiku aliases use GPT-6 Luna, and the Claude Opus 5.5 alias is supported.
   Sonnet remains on GPT-5.6 Terra.
   ([#165](https://github.com/raine/claude-code-proxy/pull/165))
-- Grok users can select Grok 4.7 with `grok-4.7`.
-  ([#162](https://github.com/raine/claude-code-proxy/pull/162))
-
 ## v0.1.41 (2026-09-19)
 
 - Long Codex requests on the HTTP transport no longer hang for minutes and then
@@ -80,18 +77,8 @@ Documentation now describes dual authentication, native routing, mixed-history l
 - Structured traffic captures redact replayable Codex compaction and reasoning
   data, reducing sensitive capture contents and file size.
   ([#153](https://github.com/raine/claude-code-proxy/pull/153))
-- Grok streams show estimated input usage from the start and use the provider's
-  exact total when available, so Claude Code's status bar no longer stays at
-  zero input tokens. Grok 4.5 and 4.6 users can also configure Claude Code for
-  their 500K context window.
-  ([#154](https://github.com/raine/claude-code-proxy/pull/154))
-
 ## v0.1.39 (2026-09-10)
 
-- OpenCode Go users can select 14 additional models, including Grok 4.6, GLM 5.3,
-  GLM 5.3 Flash, LongCat 2.0, and Qwen 3.8 Flash. Use `opencode-go/grok-4.6`
-  to select Grok through OpenCode Go.
-  ([#145](https://github.com/raine/claude-code-proxy/pull/145))
 - Fix OpenCode Go responses failing when the provider sends a harmless keepalive
   after completion. ([#145](https://github.com/raine/claude-code-proxy/pull/145))
 - OpenCode Go now reports malformed response endings and late connection failures
@@ -126,17 +113,9 @@ Documentation now describes dual authentication, native routing, mixed-history l
 
 ## v0.1.35 (2026-08-19)
 
-- Grok web search works reliably with Claude Code, preserves other tools, and
-  renders results across clients.
-  ([#112](https://github.com/raine/claude-code-proxy/pull/112))
-- Grok honors the requested reasoning effort on OpenAI-compatible routes.
 - Codex and OpenCode Go streams handle connection failures, rate-limit updates,
   and output limits more reliably.
   ([#103](https://github.com/raine/claude-code-proxy/pull/103))
-
-## v0.1.34 (2026-08-12)
-
-- Grok users can select Grok 4.6 with the `grok-4.6` model name.
 
 ## v0.1.33 (2026-08-11)
 
@@ -162,8 +141,6 @@ Documentation now describes dual authentication, native routing, mixed-history l
 - Codex HTTP responses stream as they arrive, remain active during quiet periods,
   and recover safely from temporary failures before model output begins.
   ([#51](https://github.com/raine/claude-code-proxy/pull/51))
-- OpenAI-compatible requests preserve the caller's parallel tool-call setting
-  across Codex, Kimi, and Grok routes.
 - Claude Code agents sharing a session keep independent Codex continuation state,
   preventing one agent from consuming or replacing another agent's context.
   ([#96](https://github.com/raine/claude-code-proxy/pull/96))
@@ -174,9 +151,6 @@ Documentation now describes dual authentication, native routing, mixed-history l
 
 ## v0.1.30 (2026-07-31)
 
-- OpenAI-compatible clients can use Kimi, Grok, Cursor, or Codex through the
-  optional `POST /v1/chat/completions` and `POST /v1/responses` endpoints, with
-  support for streaming, reasoning, function tools, usage, and provider routing.
 - Codex users can transcribe audio through the optional OpenAI-compatible
   `POST /v1/audio/transcriptions` endpoint using the existing Codex sign-in.
   Enable it with `codex.transcriptionsApi` or
@@ -206,8 +180,6 @@ Documentation now describes dual authentication, native routing, mixed-history l
 
 ## v0.1.27 (2026-07-29)
 
-- Grok streams remain reliable during long responses, keepalive events, and
-  output-token truncation instead of failing after partial output.
 - Forced Codex web searches keep the selected model, so Luna searches no longer
   switch to Sol, while preserving domain filters and search usage reporting.
   ([#53](https://github.com/raine/claude-code-proxy/pull/53))
@@ -230,10 +202,6 @@ Documentation now describes dual authentication, native routing, mixed-history l
 - Codex retries empty successful completions and returns a clear error if no
   usable response arrives. ([#70](https://github.com/raine/claude-code-proxy/pull/70),
   [#71](https://github.com/raine/claude-code-proxy/pull/71))
-- Grok handles images in user messages and tool results without failing requests.
-  Images are omitted by default, with opt-in vision through
-  `CCP_GROK_TOOL_IMAGE`. Traffic captures redact image payloads.
-  ([#69](https://github.com/raine/claude-code-proxy/pull/69))
 - Nix builds use vendored dependencies for reproducible sandboxed builds.
   ([#80](https://github.com/raine/claude-code-proxy/pull/80))
 
@@ -270,9 +238,6 @@ Documentation now describes dual authentication, native routing, mixed-history l
 
 ## v0.1.22 (2026-07-20)
 
-- Grok accepts request metadata and tool-result references sent by current Claude
-  Code versions while continuing to reject malformed and unknown fields.
-  ([#56](https://github.com/raine/claude-code-proxy/pull/56))
 - Gateway model discovery lists every configured provider model and Claude-style
   alias through `GET /v1/models`, making supported aliases available in Claude
   Code's model picker. ([#60](https://github.com/raine/claude-code-proxy/issues/60),
@@ -374,11 +339,6 @@ Documentation now describes dual authentication, native routing, mixed-history l
 
 ## v0.1.13 (2026-07-12)
 
-- Grok users can sign in on headless hosts with `grok auth device`.
-  ([#38](https://github.com/raine/claude-code-proxy/pull/38))
-- Grok tool calls accept Claude Code's prompt-cache markers, preventing errors
-  when switching to Grok during a tool-using session.
-  ([#37](https://github.com/raine/claude-code-proxy/pull/37))
 - Codex hosted web searches return their result links and citations to Claude
   Code instead of appearing to produce zero results.
   ([#10](https://github.com/raine/claude-code-proxy/issues/10))
@@ -397,8 +357,6 @@ Documentation now describes dual authentication, native routing, mixed-history l
 
 ## v0.1.11 (2026-07-11)
 
-- Grok subscriptions can power Claude Code through browser login, with support for
-  Grok 4.5 and Composer 2.5 Fast, streaming, thinking, tools, and token counts.
 - Codex WebSocket requests recover from handshake failures and stay marked active
   until the full response body finishes streaming.
 - The monitor shows local timestamps, clearer request status and detail indicators,

@@ -26,7 +26,6 @@ Check the provider selected by the model, then inspect its credential:
 ```sh
 claude-code-proxy codex auth status
 claude-code-proxy kimi auth status
-claude-code-proxy grok auth status
 claude-code-proxy cursor auth status
 ```
 
@@ -115,3 +114,11 @@ CCP_TRAFFIC_LOG=1 \
 ```
 
 Traffic capture writes the inbound request, translated upstream request, upstream headers and events, and downstream events in emission order. Known credentials are redacted, but prompts and tool content are preserved. Disable capture and delete artifacts after diagnosis.
+
+## Astra subagent still runs on Opus
+
+On Claude Code 2.1.299, use `CLAUDE_CODE_SUBAGENT_MODEL=gpt-6-astra[1m]`, restart through the same proxy-enabled launcher, and omit the general-purpose Agent model argument. Full IDs in that argument failed its alias enum in the observed setup. Check definition/per-call overrides, FORCE, allowlists and fallback warnings. Verify the recorded provider/model in the monitor and transcript; see [the full procedure and reversal](/using/subagents/).
+
+## Context is smaller than expected
+
+Keep `[1m]` in the client Astra setting from startup. The monitor showing `gpt-6-astra` is expected because the proxy strips the suffix. Review existing compaction overrides and 1M-disable settings using [the context guide](/using/models-and-routing/#the-1m-hint). A tiny successful probe does not test a million-token prompt.

@@ -10,7 +10,6 @@ Start with native Claude plus Codex for this fork: run the server with `CCP_ALIA
 | [Anthropic](/providers/anthropic/) (opt-in) | Claude Code subscription login or Anthropic API credentials | Anthropic Messages passthrough | `claude-*` and built-in Claude aliases | Native tools, thinking and streaming; credentials forwarded from Claude Code |
 | [Codex](/providers/codex/) | ChatGPT Plus or Pro | OpenAI Responses over WebSocket or HTTP SSE | Named Codex catalog, `-fast` and `-ultrafast` variants | Function tools, image input, hosted web search, reasoning summaries, optional native Responses route |
 | [Kimi](/providers/kimi/) | kimi.com with Kimi Code access | OpenAI-style chat completions | `kimi-for-coding` and aliases | Function tools, reasoning, image and video input |
-| [Grok](/providers/grok/) | grok.com | Responses API | `grok-composer-2.5-fast`, `grok-4.5`, `grok-4.6`, `grok-4.7` | Function tools, reasoning, web search, X search, citations |
 | [OpenCode Go](/providers/opencode-go/) | OpenCode Go subscription | OpenAI-compatible Chat Completions, OpenAI Responses, or Anthropic-compatible Messages | Non-conflicting bare IDs and `opencode-go/<model-id>` forms | Inherited curated model catalog |
 | [Cursor Agent](/providers/cursor-agent/) | Cursor account | HTTP/2 Connect stream | Cursor modes and `cursor:<model-id>` prefixes | Dynamic model catalog, effort variants, images, plan and ask modes, session continuation |
 
@@ -18,7 +17,6 @@ Start with native Claude plus Codex for this fork: run the server with `CCP_ALIA
 
 - Start with **Anthropic and Codex together** for the dual-subscription workflow. See [Getting started](/getting-started/).
 - Choose **Kimi** for the Kimi Code model and multimodal coding input.
-- Choose **Grok** for Grok models and hosted web or X search.
 - Choose **OpenCode Go** when you have a Go subscription and want its documented model catalog in Claude Code.
 - Choose **Cursor Agent** when you want Cursor's model catalog and agent modes. It depends on an installed Cursor Agent bundle for protobuf schemas.
 

@@ -27,3 +27,7 @@ Use isolated configuration and loopback mocks. Formatting, Clippy, build and tes
 The debug helper starts a local proxy and captures traffic; using its client instructions can make live requests. Run it only for an authorized investigation. Native errors stream through directly; do not assume every error has a saved payload. Other providers retain their diagnostic captures.
 
 Prompts, tool inputs, file paths, captures and logs can contain private data even when known credential fields are redacted. Never publish credentials or unreviewed diagnostics. Keep the listener on loopback. Do not upload captures or alter external service settings without authorization.
+
+## Confirmed parent/subagent setup
+
+The user confirmed Opus 5.5 parent + `gpt-6-astra[1m]` general-purpose operation on Claude Code 2.1.299 after restarting through the same proxy-enabled launcher. See [setup, model precedence, context limits and verification](/using/subagents/). This is a limited real-use confirmation; broader live regression remains outstanding.

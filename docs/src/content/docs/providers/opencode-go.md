@@ -3,7 +3,7 @@ title: OpenCode Go
 description: Configure an OpenCode Go API key, model routing, streaming, tools, and provider overrides.
 ---
 
-This inherited provider is retained alongside the dual Claude/Codex workflow. This fork has not performed live account testing; see [development status](/reference/development-status/) and use the [dual-mode client setup](/using/configure-claude-code/).
+This inherited provider is retained alongside the dual Claude/Codex workflow. This provider has not been live-tested in this fork; see [development status](/reference/development-status/) and use the [dual-mode client setup](/using/configure-claude-code/).
 
 OpenCode Go uses the API at `https://opencode.ai/zen/go/v1`. Its catalog spans
 OpenAI-compatible chat completions, Anthropic-compatible messages, and OpenAI
@@ -36,8 +36,8 @@ ANTHROPIC_SMALL_FAST_MODEL=opencode-go/glm-5.2 \
   claude --model opencode-go/glm-5.2
 ```
 
-The bare IDs `gpt-5.6-luna`, `grok-4.5`, `grok-4.6`, `kimi-k3`, and `kimi-k2.6`
-remain owned by the existing Codex, Grok, or Kimi providers. Prefix those IDs
+The bare IDs `gpt-5.6-luna`, `kimi-k3`, and `kimi-k2.6`
+remain owned by the existing Codex or Kimi providers. Prefix those IDs
 with `opencode-go/` to select the OpenCode Go version.
 
 ## Tools and streaming

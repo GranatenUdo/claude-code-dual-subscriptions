@@ -9,7 +9,7 @@ Anthropic passthrough is opt-in. Set `aliasProvider` to `anthropic` in `config.j
 CCP_ALIAS_PROVIDER=anthropic claude-code-proxy serve
 ```
 
-This sends `claude-*` models and the built-in `haiku`, `sonnet`, `opus`, and `fable` aliases to `api.anthropic.com`. Explicit GPT, Kimi, Grok, OpenCode Go and Cursor IDs retain their provider. A preceding GPT or Kimi turn does not change where the Claude aliases go. Restart the proxy after changing `aliasProvider`.
+This sends `claude-*` models and the built-in `haiku`, `sonnet`, `opus`, and `fable` aliases to `api.anthropic.com`. Explicit GPT, Kimi, OpenCode Go and Cursor IDs retain their provider. A preceding GPT or Kimi turn does not change where the Claude aliases go. Restart the proxy after changing `aliasProvider`.
 
 ## Authentication and model switching
 
@@ -21,7 +21,7 @@ Launch Claude Code using its existing subscription login:
 env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY \
   ANTHROPIC_BASE_URL=http://127.0.0.1:18765 \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
-  claude --model claude-opus-5
+  claude --model claude-opus-5-5
 ```
 
 Also remove dummy credentials from Claude Code settings if configured there. `ANTHROPIC_AUTH_TOKEN=unused` replaces the subscription login and causes the Anthropic route to fail. Deliberately configured Anthropic API credentials are forwarded too.
@@ -34,8 +34,7 @@ See [Claude Code's authentication precedence](https://code.claude.com/docs/en/ll
 The proxy preserves the OAuth `anthropic-beta` header. Claude Code remains
 responsible for login and refresh. No shared Codex CLI credential file is modified.
 
-This is a development fork tested with local mock servers. Live account behavior
-has not been verified. Non-Claude model routing is not officially supported by
+This is a development fork tested with local mock servers. The user confirmed the limited Opus/Astra subagent setup below; broader live account behavior remains unverified. Non-Claude model routing is not officially supported by
 Anthropic. Do not infer provider approval from successful local protocol tests.
 
 Use `/model gpt-6-astra` and `/model claude-opus-5` to switch between the providers. Availability still depends on the selected provider account. The model catalog advertises known aliases, but explicit new `claude-*` IDs can be forwarded without a proxy release.
@@ -59,3 +58,7 @@ headers and query credentials are discarded before dispatch to translating
 providers. Anthropic's production destination is fixed to `https://api.anthropic.com`;
 the injected client constructor is for mock testing, not a runtime URL setting.
 The listener remains loopback by default. Do not expose it to untrusted clients.
+
+## Confirmed parent/subagent setup
+
+The user confirmed Opus 5.5 parent + `gpt-6-astra[1m]` general-purpose operation on Claude Code 2.1.299 after restarting through the same proxy-enabled launcher. See [setup, model precedence, context limits and verification](/using/subagents/). This is a limited real-use confirmation; broader live regression remains outstanding.

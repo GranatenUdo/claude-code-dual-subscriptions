@@ -7,7 +7,7 @@ claude-code-proxy targets Claude Code's practical Anthropic API usage rather tha
 
 ## Fork validation and distribution
 
-The Linux/WSL build, formatting, strict lint and 1,136 local tests passed. Live subscriptions and native Windows/macOS builds remain unverified. No fork binary releases or hosted documentation exist. See [Development status](/reference/development-status/).
+The Linux/WSL build, formatting, strict lint and 1,136 local tests passed. The user confirmed the Opus/Astra subagent setup on 2.1.299; broader live regression and native Windows/macOS builds remain unverified. No fork binary releases or hosted documentation exist. See [Development status](/reference/development-status/).
 
 The inherited `lru 0.12.5` dependency is affected by RUSTSEC-2026-0002 and RUSTSEC-2026-0253. Ratatui 0.29 excludes the patched versions; this remains unresolved.
 
@@ -15,7 +15,7 @@ The inherited `lru 0.12.5` dependency is affected by RUSTSEC-2026-0002 and RUSTS
 
 - Provider subscriptions, allowed models, regions, quotas, and enforcement remain under each provider's control.
 - Anthropic does not officially support non-Claude routing through Claude Code. Local protocol tests do not verify live subscription acceptance.
-- Kimi, Grok, and Cursor use unofficial client integrations. Review the terms and account risk for your use.
+- Kimi and Cursor use unofficial client integrations. Review the terms and account risk for your use.
 - Upstream rate limits are shared with other clients on the same account.
 
 ## Listener security
@@ -37,10 +37,9 @@ The inherited `lru 0.12.5` dependency is affected by RUSTSEC-2026-0002 and RUSTS
 
 ## OpenAI API scope
 
-- `CCP_CODEX_RESPONSES_API=1` enables `/v1/chat/completions` and `/v1/responses` for Codex, Kimi, Grok, OpenCode Go, and Cursor models.
+- `CCP_CODEX_RESPONSES_API=1` enables `/v1/chat/completions` and `/v1/responses` for Codex, Kimi, OpenCode Go, and Cursor models.
 - Codex Responses requests use native passthrough. Requests for the other providers support their mapped subsets of text, reasoning, function tools, tool results, token limits, usage, streaming, aliases, and `[1m]` model hints; exact support depends on the selected provider and model.
 - Unsupported non-null request fields return an error instead of being ignored.
-- Grok search calls appear as Responses `web_search_call` items. Chat Completions returns the citations without a separate search item.
 - Cursor tool bridging supports `Read`, `Write`, and `Bash`. It requires streaming and a stable session ID.
 - Stored Responses operations, WebSocket ingress, multiple choices, audio, log probabilities, and arbitrary hosted tools are unsupported.
 
@@ -69,15 +68,6 @@ The inherited `lru 0.12.5` dependency is affected by RUSTSEC-2026-0002 and RUSTS
 - Reasoning effort supports Kimi's low, medium, and high levels.
 - Images in tool results use Kimi tool-message image parts.
 - The persistent device ID is part of the login identity and must remain stable.
-
-## Grok
-
-- Model availability varies by account and region.
-- Hosted general web search and X search are translated with citations and usage.
-- Hosted web search omits `max_uses` because the Grok CLI endpoint exposes no
-  equivalent cap. Non-null domain filters and user location are rejected because
-  dropping them would weaken the caller's requested search scope.
-- The implemented multimodal path does not claim general image or video compatibility.
 
 ## Cursor Agent
 

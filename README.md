@@ -5,7 +5,8 @@ saved claude.ai subscription login and GPT models using the proxy's separate
 ChatGPT/Codex OAuth login, within one Claude Code session.
 
 **Status:** 1,136 local tests passed, including eight Anthropic mock integration
-tests. Live subscription use is unverified. Anthropic does not officially support
+tests. The user confirmed Opus 5.5 parent + Astra subagent operation on Claude Code
+2.1.299; broader live regression and 1M-token inference remain unverified. Anthropic does not officially support
 non-Claude model routing. The inherited LRU advisories remain unresolved; see
 [validation](DEVELOPMENT.md) and [dependency review](DEPENDENCY-REVIEW.md).
 
@@ -32,7 +33,7 @@ macOS builds have not been validated here; Linux/WSL is the verified build path.
 
 ## Dual-subscription quickstart
 
-These are manual live-use instructions, not evidence of completed live testing.
+These are manual live-use instructions; the confirmed scope is the subagent setup below.
 Use an account with access to the selected models. Sign in to Claude Code normally
 using its own login flow first. The proxy never reads or refreshes that login.
 
@@ -57,7 +58,7 @@ env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY \
   ANTHROPIC_BASE_URL=http://127.0.0.1:18765 \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
   CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1 \
-  claude --model claude-opus-5
+  claude --model claude-opus-5-5
 ```
 
 Do not supply a dummy auth token. An `ANTHROPIC_AUTH_TOKEN`, approved
@@ -69,14 +70,32 @@ copy OAuth tokens into this proxy. See [authentication setup](docs/src/content/d
 After each turn, including tool results, finishes, switch in the same session:
 
 ```text
-/model gpt-6-sol
-/model claude-opus-5
+/model gpt-6-astra[1m]
+/model claude-opus-5-5
 ```
 
 Model access is account-dependent. Claude aliases and `claude-*` IDs stay on the
 fixed Anthropic upstream even after GPT turns. GPT uses only the proxy's Codex
 credentials. Native thinking signatures are preserved; foreign visible reasoning
 becomes text, not fabricated signed thinking. See [switching and history](docs/src/content/docs/using/switching-models-and-backends.md).
+
+## Working Opus parent + Astra subagent setup
+
+Merge this into the existing project-local `.claude/settings.local.json` environment without replacing unrelated settings:
+
+~~~json
+{
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "gpt-6-astra[1m]"
+  }
+}
+~~~
+
+Fully restart Claude Code through the **same proxy-enabled launcher**. Use the built-in general-purpose subagent with **no per-call model argument**. On the user's 2.1.299 installation that argument accepts only Claude aliases, so a full GPT ID there is rejected. No custom Astra agent type is needed. Leave `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` unset so an explicit `opus` reviewer can retain its selection; that reviewer probe is not yet verified.
+
+The user confirmed the post-restart transcript recorded `gpt-6-astra`; the pre-restart probe used Opus. `[1m]` requests Claude Code's 1M context assumption for this custom ID, and the proxy strips it before upstream routing. This does not establish the account's actual capacity or prove million-token inference. Check old compaction overrides before relying on the larger window.
+
+See [subagent setup, verification and undo](docs/src/content/docs/using/subagents.md) and [precise context behavior](docs/src/content/docs/using/models-and-routing.md#the-1m-hint).
 
 ## Documentation and other providers
 
@@ -92,7 +111,7 @@ the local Astro preview. Start with:
 - [Other providers](docs/src/content/docs/providers/choosing-a-provider.md)
 - [Local docs build and validation](DEVELOPMENT.md)
 
-Kimi, Grok, OpenCode Go and Cursor functionality is retained. Their guides describe
+Kimi, OpenCode Go and Cursor functionality is retained. Their guides describe
 inherited implementation behavior, not new live-account validation by this fork.
 Keep the unauthenticated listener on its default `127.0.0.1` address.
 

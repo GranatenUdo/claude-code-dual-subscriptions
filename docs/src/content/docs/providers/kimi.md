@@ -3,7 +3,7 @@ title: Kimi
 description: Configure Kimi Code authentication, model aliases, reasoning effort, tools, images, video, token refresh, and provider settings.
 ---
 
-This inherited provider is retained alongside the dual Claude/Codex workflow. This fork has not performed live account testing; see [development status](/reference/development-status/) and use the [dual-mode client setup](/using/configure-claude-code/).
+This inherited provider is retained alongside the dual Claude/Codex workflow. This provider has not been live-tested in this fork; see [development status](/reference/development-status/) and use the [dual-mode client setup](/using/configure-claude-code/).
 
 Kimi uses the OpenAI-style chat completions endpoint at `https://api.kimi.com/coding/v1/chat/completions`.
 

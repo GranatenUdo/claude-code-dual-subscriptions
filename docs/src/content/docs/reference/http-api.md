@@ -47,7 +47,7 @@ Accepts the same basic Anthropic request shape and returns:
 
 Native Claude token counting is forwarded to Anthropic with client auth and can return native errors. It is not a local estimate.
 
-Codex tokenizes text locally with `o200k_base` and adds estimates for images, encrypted reasoning, and protocol framing. Kimi, Grok, and OpenCode Go use local text heuristics, while Cursor estimates the rendered prompt from its character length. Counts support Claude Code compaction behavior and are estimates rather than provider billing values.
+Codex tokenizes text locally with `o200k_base` and adds estimates for images, encrypted reasoning, and protocol framing. Kimi and OpenCode Go use local text heuristics, while Cursor estimates the rendered prompt from its character length. Counts support Claude Code compaction behavior and are estimates rather than provider billing values.
 
 ## `GET /v1/models`
 
@@ -74,7 +74,7 @@ Claude Code gateway discovery filters IDs according to its own model rules. See 
 
 ## `POST /v1/chat/completions`
 
-Enable this route with `CCP_CODEX_RESPONSES_API=1` or `codex.responsesApi: true`. The `model` field selects Codex, Kimi, Grok, OpenCode Go, or Cursor. The proxy ignores incoming bearer credentials and uses the configured provider credential.
+Enable this route with `CCP_CODEX_RESPONSES_API=1` or `codex.responsesApi: true`. The `model` field selects Codex, Kimi, OpenCode Go, or Cursor. The proxy ignores incoming bearer credentials and uses the configured provider credential.
 
 ```sh
 curl http://127.0.0.1:18765/v1/chat/completions \
@@ -82,7 +82,7 @@ curl http://127.0.0.1:18765/v1/chat/completions \
   -d '{"model":"kimi-k2.6","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-For Kimi, Grok, OpenCode Go, and Cursor, the route accepts:
+For Kimi, OpenCode Go, and Cursor, the route accepts:
 
 - `system`, `developer`, `user`, `assistant`, and `tool` messages
 - text, supported user images, function calls, and tool results
@@ -91,11 +91,9 @@ For Kimi, Grok, OpenCode Go, and Cursor, the route accepts:
 - `reasoning_effort`
 - streaming, non-streaming responses, and `stream_options.include_usage`
 
-For Grok, `reasoning_effort` accepts `none`, `low`, `medium`, `high`, `xhigh`, and `max`. `xhigh` is available at full strength on `grok-4.6`; `xhigh` and `max` map to `high` for other registered Grok models.
-
 Codex uses its own compatibility path. It supports text messages, `reasoning_effort`, `response_format`, `stream_options.include_usage`, `temperature`, `top_p`, and `user`. Reasoning effort defaults to `medium`, and the proxy-wide Codex effort setting takes precedence. Function calls, images, audio, log probabilities, multiple choices, storage, and output token limits are not supported on the Codex Chat Completions path.
 
-Non-streaming requests return a `chat.completion` object. Streaming requests return `chat.completion.chunk` events followed by `data: [DONE]`. Grok citations are included in message annotations.
+Non-streaming requests return a `chat.completion` object. Streaming requests return `chat.completion.chunk` events followed by `data: [DONE]`.
 
 Unsupported non-null fields return `invalid_request_error` with the field named in `error.param`. Cursor tools are limited to `Read`, `Write`, and `Bash`. They require `stream: true` and a stable session header.
 
@@ -128,15 +126,15 @@ The Images API is an internal ChatGPT Codex integration, not the public OpenAI P
 
 ## `POST /v1/responses`
 
-Enable this route with `CCP_CODEX_RESPONSES_API=1` or `codex.responsesApi: true`. The `model` field selects Codex, Kimi, Grok, OpenCode Go, or Cursor.
+Enable this route with `CCP_CODEX_RESPONSES_API=1` or `codex.responsesApi: true`. The `model` field selects Codex, Kimi, OpenCode Go, or Cursor.
 
 ```sh
 curl http://127.0.0.1:18765/v1/responses \
   -H 'Content-Type: application/json' \
-  -d '{"model":"grok-4.5","input":"Hello"}'
+  -d '{"model":"gpt-6-astra","input":"Hello"}'
 ```
 
-Codex models use native Responses passthrough, including native JSON and SSE output. For Kimi, Grok, OpenCode Go, and Cursor, the route accepts:
+Codex models use native Responses passthrough, including native JSON and SSE output. For Kimi, OpenCode Go, and Cursor, the route accepts:
 
 - string input or message items
 - `instructions`
@@ -145,17 +143,15 @@ Codex models use native Responses passthrough, including native JSON and SSE out
 - `reasoning.effort`
 - streaming or non-streaming output
 
-For Grok, `reasoning.effort` accepts `none`, `low`, `medium`, `high`, `xhigh`, and `max`, with model-specific mapping for the highest levels.
-
-Responses include the accepted tool settings. Grok search appears as a `web_search_call`, with sources in URL citation annotations. When a provider reaches its output token limit, the response status is `incomplete` and the reason is `max_output_tokens`.
+Responses include the accepted tool settings. When a provider reaches its output token limit, the response status is `incomplete` and the reason is `max_output_tokens`.
 
 `store: true` and other unsupported non-null fields return an error. Stored response retrieval, deletion, and WebSocket client connections are not supported.
 
 ### Parallel tool calls
 
-The shared Kimi, Grok, and Cursor ingress accepts boolean `parallel_tool_calls` on both OpenAI routes. `false` preserves serial tool execution through translation, while `true` selects the existing parallel default. Omitting the field leaves the provider default unchanged. Non-boolean values return an `invalid_request_error` with `parallel_tool_calls` in `error.param`.
+The shared Kimi and Cursor ingress accepts boolean `parallel_tool_calls` on both OpenAI routes. `false` preserves serial tool execution through translation, while `true` selects the existing parallel default. Omitting the field leaves the provider default unchanged. Non-boolean values return an `invalid_request_error` with `parallel_tool_calls` in `error.param`.
 
-The setting applies without changing the requested `tool_choice` mode. This includes omitted or `auto` choices, `none`, `required`, and named functions. Internally, an explicit OpenAI setting determines the equivalent Anthropic `tool_choice.disable_parallel_tool_use` value. Anthropic Messages requests can set `disable_parallel_tool_use` directly. Kimi and Grok receive the corresponding upstream `parallel_tool_calls` value, and Cursor's bridged tool loop remains serial between client tool results.
+The setting applies without changing the requested `tool_choice` mode. This includes omitted or `auto` choices, `none`, `required`, and named functions. Internally, an explicit OpenAI setting determines the equivalent Anthropic `tool_choice.disable_parallel_tool_use` value. Anthropic Messages requests can set `disable_parallel_tool_use` directly. Kimi receives the corresponding upstream `parallel_tool_calls` value, and Cursor's bridged tool loop remains serial between client tool results.
 
 Codex Responses uses native passthrough and forwards `parallel_tool_calls` unchanged. Codex Chat Completions has its own field allowlist and rejects `parallel_tool_calls` because that path does not support function tools.
 

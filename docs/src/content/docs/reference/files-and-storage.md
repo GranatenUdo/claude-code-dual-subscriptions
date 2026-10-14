@@ -32,7 +32,7 @@ On macOS, Codex and Cursor use Keychain services:
 - `claude-code-proxy.codex`
 - `claude-code-proxy.cursor`
 
-Kimi and Grok use `<configuration-root>/<provider>/auth.json` on every platform. Codex and Cursor use the same file layout on Linux and Windows. File-backed credentials are written with restrictive permissions where supported.
+Kimi uses `<configuration-root>/<provider>/auth.json` on every platform. Codex and Cursor use the same file layout on Linux and Windows. File-backed credentials are written with restrictive permissions where supported.
 
 When `CCP_CONFIG_DIR` is set, file-backed provider credentials use
 `<CCP_CONFIG_DIR>/<provider>/auth.json`, including Codex and Cursor on macOS.
@@ -43,7 +43,7 @@ OpenCode Go is the exception: it reads its API key from
 `CCP_OPENCODE_API_KEY`, `OPENCODE_API_KEY`, or `opencode.apiKey` in
 `config.json` and does not create a provider auth store.
 
-The proxy owns these credentials independently of native Codex, Grok, and Cursor Agent stores.
+The proxy owns these credentials independently of native Codex, and Cursor Agent stores.
 
 ## Kimi device ID
 

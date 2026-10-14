@@ -11,7 +11,6 @@ The model ID in each request selects its provider. For dual subscriptions explic
 | --- | --- |
 | Registered `gpt-*` IDs and their `-fast` and `-ultrafast` forms | Codex |
 | `kimi-for-coding`, `kimi-k2.6`, `k2.6`, `kimi-k3`, `k3` | Kimi |
-| `grok-composer-2.5-fast`, `grok-4.5`, `grok-4.6`, `grok-4.7` | Grok |
 | Non-conflicting registered OpenCode Go IDs and every `opencode-go/<model-id>` | OpenCode Go |
 | `cursor`, Cursor legacy aliases, `cursor:<id>`, `cursor-plan:<id>`, `cursor-ask:<id>` | Cursor Agent |
 | Anthropic-style aliases such as `haiku`, `sonnet`, `opus`, `fable`, and registered `claude-*` aliases | Anthropic in dual mode; legacy built-in default is Codex |
@@ -47,14 +46,18 @@ For Claude Code requests on `/v1/messages`, a configured `codex.serviceTier` or 
 
 ## The `[1m]` hint
 
-A trailing `[1m]` affects Claude Code's local compaction policy. The proxy strips it before matching and forwarding the model. Use it only when the upstream model and account can accept the resulting context, and set a safe `CLAUDE_CODE_AUTO_COMPACT_WINDOW` when the real limit is below one million tokens.
+Astra examples use `gpt-6-astra[1m]` from session/subagent startup. Current [official client documentation](https://code.claude.com/docs/en/model-config#correct-the-window-for-a-gateway-or-custom-model-id) says an unrecognized custom ID containing `[1m]` makes Claude Code assume a 1M window. This is a client context policy, not a provider capacity declaration. The reported 2.1.299 probe verified Astra operation, not a 1M-token request or a measured compaction threshold.
+
+Source `normalize_incoming_model` removes a trailing, case-insensitive `[1m]` before routing. Thus `gpt-6-astra[1m]` goes upstream as `gpt-6-astra`, which the monitor/transcript may show.
+
+Review older overrides: `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, per-model/top-level `autoCompactWindow`, and `--autocompact` can request earlier compaction. `CLAUDE_CODE_DISABLE_1M_CONTEXT` changes the custom-ID rule. Remove or intentionally revise obsolete overrides; do not blindly keep a prior 200K/500K limit while expecting 1M behavior. No compaction-disabling flag is needed here. Actual model/account limits still apply; choose a smaller client window if the provider cannot accept the history. See the official [auto-compaction controls](https://code.claude.com/docs/en/model-config#set-the-auto-compact-window).
 
 ## Main and small models
 
 Set both model variables to routable IDs:
 
 ```sh
-ANTHROPIC_MODEL=claude-opus-5
+ANTHROPIC_MODEL=claude-opus-5-5
 ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4-5
 ```
 
@@ -90,3 +93,7 @@ ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4-5 \
 `CCP_ALIAS_PROVIDER=kimi` or `"aliasProvider": "kimi"` routes recognized Anthropic-style aliases to Kimi. Accepted values are `codex`, `kimi`, and `anthropic`. Registered Claude IDs are also legacy aliases when native mode is not enabled. Explicit GPT and other provider IDs retain their provider.
 
 With `anthropic`, Claude aliases and explicit `claude-*` IDs go to [Anthropic](/providers/anthropic/) using the credentials Claude Code sends. They remain on Anthropic even after a GPT or Kimi turn establishes session affinity. Existing `codex` and `kimi` alias behavior is unchanged.
+
+## Parent and subagent selection
+
+The confirmed setup keeps Opus 5.5 as parent and uses `CLAUDE_CODE_SUBAGENT_MODEL=gpt-6-astra[1m]` for general-purpose. Agent-type names and model IDs are distinct. See [subagent precedence and verification](/using/subagents/).

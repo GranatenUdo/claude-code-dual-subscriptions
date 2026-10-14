@@ -23,8 +23,8 @@ without a dummy auth token. Neither login replaces the other.
 After the current response and all tool results are complete:
 
 ```text
-/model gpt-6-sol
-/model claude-opus-5
+/model gpt-6-astra[1m]
+/model claude-opus-5-5
 /model sonnet
 ```
 
@@ -57,7 +57,6 @@ available in dual mode:
 
 ```text
 /model kimi-for-coding
-/model grok-4.7
 /model cursor:gpt-5.5
 /model opencode-go/glm-5.2
 ```
@@ -71,3 +70,6 @@ Start a new Claude Code process without `ANTHROPIC_BASE_URL` and without gateway
 credential overrides, accounting for any settings-file values. In-session
 `/model` does not change the base URL. No wrapper or global settings modification
 is required for this fork's process-scoped quickstart.
+## Confirmed parent/subagent setup
+
+The user confirmed Opus 5.5 parent + `gpt-6-astra[1m]` general-purpose operation on Claude Code 2.1.299 after restarting through the same proxy-enabled launcher. See [setup, model precedence, context limits and verification](/using/subagents/). This is a limited real-use confirmation; broader live regression remains outstanding.

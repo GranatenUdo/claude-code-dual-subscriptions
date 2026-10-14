@@ -28,3 +28,7 @@ Session IDs support monitor grouping and provider continuity. Cursor conversatio
 Optional OpenAI-compatible endpoints serve translating providers. Native Anthropic passthrough is available only through the Messages and count-token endpoints. Unknown non-Claude models return a routing error; explicit new `claude-*` IDs can pass through without a catalog update.
 
 See [authentication](/using/configure-claude-code/), [HTTP contracts](/reference/http-api/) and [development limitations](/reference/development-status/). This architecture is mock-tested; live subscription switching remains unverified.
+
+## Confirmed parent/subagent setup
+
+The user confirmed Opus 5.5 parent + `gpt-6-astra[1m]` general-purpose operation on Claude Code 2.1.299 after restarting through the same proxy-enabled launcher. See [setup, model precedence, context limits and verification](/using/subagents/). This is a limited real-use confirmation; broader live regression remains outstanding.

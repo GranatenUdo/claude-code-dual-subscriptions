@@ -16,10 +16,10 @@ env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY \
   ANTHROPIC_BASE_URL=http://127.0.0.1:18765 \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
   CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1 \
-  claude --model claude-opus-5
+  claude --model claude-opus-5-5
 ```
 
-These are manual live-use instructions. This fork has only been mock-tested.
+These are manual live-use instructions. The user confirmed the [Opus/Astra subagent setup](/using/subagents/) on 2.1.299; this is not complete live validation.
 
 ## Authentication precedence
 
@@ -55,8 +55,7 @@ Leave it unset initially or choose a concrete ID intentionally.
 
 The native Anthropic route preserves the requested streaming mode. Translating
 providers can accumulate upstream streams into non-streaming responses.
-A trailing `[1m]` is a client context hint stripped by the proxy; it does not
-increase account context limits. Use a conservative limit valid for every model
+Use `gpt-6-astra[1m]` for the confirmed Astra subagent setup. The suffix selects the custom-ID 1M client assumption and is stripped by the proxy; it does not increase account context limits. See [context policy and old compaction overrides](/using/models-and-routing/#the-1m-hint). Use a conservative limit valid for every model
 you intend to switch between, or omit overrides and compact before switching a
 large history. No single context override is prescribed for dual mode.
 
@@ -71,3 +70,6 @@ changing its launch environment.
 `CCP_*`, `PORT` and proxy `config.json` apply to the server.
 For example, `{"aliasProvider":"anthropic"}` in the proxy configuration enables
 dual mode persistently. See [Configuration](/reference/configuration/).
+## Project-local subagent default
+
+Merge `CLAUDE_CODE_SUBAGENT_MODEL=gpt-6-astra[1m]` into the existing settings `env` object, then restart through the same proxy-enabled launcher. Keep FORCE unset and omit the general-purpose per-call model argument. Follow the [merge-safe JSON example and undo instructions](/using/subagents/).

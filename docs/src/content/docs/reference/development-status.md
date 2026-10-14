@@ -18,7 +18,7 @@ cargo test --all --locked
 
 ## Not verified or distributed
 
-No live subscription requests have been made. Account access, token refresh and live cross-provider history acceptance need separately approved testing. Non-Claude routing is not officially supported by Anthropic. Native Windows compilation was blocked by a missing MSVC linker; Windows and macOS builds are not certified here.
+The implementation/test agent made no live subscription requests. Account access, token refresh and live cross-provider history acceptance need separately approved testing. Non-Claude routing is not officially supported by Anthropic. Native Windows compilation was blocked by a missing MSVC linker; Windows and macOS builds are not certified here.
 
 No fork releases, prebuilt binaries, package formula or hosted documentation are published. Build this fork from source using the [quickstart](/getting-started/). Upstream release assets do not contain this implementation. Documentation CI only builds and checks links; it does not deploy a website.
 
@@ -39,3 +39,9 @@ bun run dev
 ~~~
 
 The preview uses localhost:4321; generated links refer to that local preview. No external hosting setup is needed.
+
+## User-confirmed operation: Claude Code 2.1.299
+
+The user reports a working Opus 5.5 parent and general-purpose Astra subagent after setting `CLAUDE_CODE_SUBAGENT_MODEL=gpt-6-astra[1m]` in project-local settings and restarting through the same proxy-enabled launcher. The pre-restart probe used Opus; the post-restart transcript recorded `gpt-6-astra`. No full-ID per-call model argument was used.
+
+This evidence does not verify the explicit Opus reviewer exception, million-token inference, all refresh/history paths, or a complete live regression/security review. The unresolved dependency advisories remain. This documentation update makes no provider calls or user-project settings changes.

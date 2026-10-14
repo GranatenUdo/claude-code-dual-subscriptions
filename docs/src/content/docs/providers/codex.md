@@ -5,7 +5,7 @@ description: Configure ChatGPT Codex authentication, models, reasoning, tools, i
 
 Codex uses the ChatGPT subscription Responses endpoint at `https://chatgpt.com/backend-api/codex/responses`.
 
-Use this alongside native Claude with `CCP_ALIAS_PROVIDER=anthropic`. The mock-tested routing keeps the credentials separate; live account use remains unverified.
+Use this alongside native Claude with `CCP_ALIAS_PROVIDER=anthropic`. The mock-tested routing keeps the credentials separate; the user confirmed the limited Opus/Astra subagent setup below.
 
 ## Account and authentication
 
@@ -114,7 +114,7 @@ While the native request is active, the monitor shows `compacting`. Structured l
 
 ## OpenAI-compatible APIs
 
-`CCP_CODEX_RESPONSES_API=1` enables both `POST /v1/responses` and `POST /v1/chat/completions`. The setting is under Codex configuration, but the routes also accept Kimi, Grok, OpenCode Go, and Cursor models.
+`CCP_CODEX_RESPONSES_API=1` enables both `POST /v1/responses` and `POST /v1/chat/completions`. The setting is under Codex configuration, but the routes also accept Kimi, OpenCode Go, and Cursor models.
 
 The Responses route preserves native JSON or SSE response bodies for registered Codex models. The Chat Completions route translates standard text messages, reasoning effort, JSON object or JSON Schema output, and buffered or streaming responses. Its omitted reasoning effort defaults to `medium`; the proxy-wide Codex effort override still takes precedence.
 
@@ -135,3 +135,7 @@ This is an internal ChatGPT Codex interface rather than the public Platform Imag
 Because callers are not authenticated, binding to a LAN address lets every firewall-admitted host consume the signed-in account's quota. Restrict the listener to a trusted interface/subnet and never expose it through router forwarding, UPnP, a public tunnel, or permissive IPv6 rules.
 
 See [Configuration](/reference/configuration/) for every Codex setting and [Troubleshooting](/using/troubleshooting/) for auth, model, and transport failures.
+
+## Confirmed parent/subagent setup
+
+The user confirmed Opus 5.5 parent + `gpt-6-astra[1m]` general-purpose operation on Claude Code 2.1.299 after restarting through the same proxy-enabled launcher. See [setup, model precedence, context limits and verification](/using/subagents/). This is a limited real-use confirmation; broader live regression remains outstanding.

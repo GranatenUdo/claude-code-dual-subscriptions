@@ -72,14 +72,12 @@ claude-code-proxy <provider> auth <action>
 | --- | --- | --- | --- | --- |
 | `codex` | Browser PKCE | Device code | Account, expiry, storage | Delete proxy credential |
 | `kimi` | Device code | Unsupported | User, expiry, scope, storage | Delete proxy credential |
-| `grok` | Browser PKCE | Device code | Expiry and storage | Delete proxy credential |
 | `cursor` | Browser polling flow | Unsupported | Source, claims, expiry | Delete proxy credential |
 
 Examples:
 
 ```sh
 claude-code-proxy codex auth login
-claude-code-proxy grok auth device
 claude-code-proxy kimi auth status
 claude-code-proxy cursor auth logout
 ```

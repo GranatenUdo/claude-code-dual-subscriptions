@@ -337,6 +337,8 @@ static WS_POOL_TEST_LOCK: AsyncMutex<()> = AsyncMutex::const_new(());
 static WS_CONNECT_GATE: once_cell::sync::Lazy<WebSocketConnectGate> =
     once_cell::sync::Lazy::new(|| WebSocketConnectGate::new(WEBSOCKET_CONNECT_START_SPACING));
 
+// Keep compatibility with Rust versions predating the try_update rename.
+#[allow(deprecated)]
 fn next_monotonic_nonzero(sequence: &AtomicU64, label: &str) -> u64 {
     let previous = sequence
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {

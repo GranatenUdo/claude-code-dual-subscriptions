@@ -1,5 +1,17 @@
 # claude-code-proxy
 
+> **Development fork: dual subscriptions.** Native Claude requests can use Claude
+> Code's saved claude.ai login, while GPT requests use this proxy's separate Codex
+> OAuth login. Enable `CCP_ALIAS_PROVIDER=anthropic`. Do **not** set
+> `ANTHROPIC_AUTH_TOKEN=unused` for this mode. See [subscription setup](docs/src/content/docs/providers/anthropic.md).
+> Live subscription switching has **not** been verified; validation uses local mock servers.
+> Anthropic does not officially support routing Claude Code to non-Claude models.
+
+This fork retains the history and MIT license of [raine/claude-code-proxy](https://github.com/raine/claude-code-proxy).
+The native passthrough is adapted from [Sören Nikolaus's PR #133](https://github.com/raine/claude-code-proxy/pull/133),
+commit `f9084b283d5f7681b023bd40f7662659eae2f337`, onto upstream `2e2975a` (v0.1.45).
+The quick start below is upstream's Codex-only setup; use the linked subscription setup for dual mode.
+
 Claude Code, powered by **OpenAI Codex**, **Kimi**, **Grok**, **OpenCode Go**,
 or **Cursor Agent**.
 
@@ -93,6 +105,12 @@ curl http://127.0.0.1:18765/v1/images/generations \
 The opt-in Images API returns base64 image data and consumes the signed-in account's image quota. Image prompts and payloads are excluded from traffic captures. See the [HTTP API](https://claude-code-proxy.raine.dev/reference/http-api/) for generation and edit schemas.
 
 ## Providers
+
+To keep Claude models on Anthropic while switching GPT models through Codex in the
+same session, opt in with `CCP_ALIAS_PROVIDER=anthropic`. See
+[Anthropic passthrough](https://claude-code-proxy.raine.dev/providers/anthropic/)
+for subscription authentication and thinking compatibility.
+
 
 | Provider     | Account                        | Model selection                                 |
 | ------------ | ------------------------------ | ----------------------------------------------- |

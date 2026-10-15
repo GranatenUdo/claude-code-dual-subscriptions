@@ -8,7 +8,7 @@ Local mock tests passed. The user also confirmed Opus 5.5 parent + Astra subagen
 The commands below are for a user choosing to perform live testing. Other
 providers remain available in [their guides](/providers/choosing-a-provider/).
 
-This guide uses the existing `claude-code-proxy`. The separate uncommitted
+This guide uses the existing `claude-code-proxy`. The separate experimental
 `claude-code-dual` launcher fixes workers to Astra and rejects Sol; the named Sol
 agent setup below does not extend that candidate's contract.
 

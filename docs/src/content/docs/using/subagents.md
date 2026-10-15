@@ -7,7 +7,7 @@ The user confirmed this setup works on **Claude Code 2.1.299**: an Opus 5.5 pare
 
 ## Merge the subagent default
 
-This guide uses the existing `claude-code-proxy` workflow. The separate, uncommitted [experimental `claude-code-dual` launcher](/using/experimental-launcher/) has a fixed Astra worker contract and rejects Sol requests. Its contract has not been extended by this documentation update.
+This guide uses the existing `claude-code-proxy` workflow. The separate [experimental `claude-code-dual` launcher](/using/experimental-launcher/) has a fixed Astra worker contract and rejects Sol requests. Its contract has not been extended by this documentation update.
 
 In the target project's `.claude/settings.local.json`, merge this key into the existing `env` object. Do not replace the file or discard permissions, hooks, other environment keys, or existing settings. This is an example for a user to apply; repository development does not edit their project settings.
 

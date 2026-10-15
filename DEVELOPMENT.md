@@ -58,8 +58,8 @@ This evidence does not verify the explicit Opus reviewer exception, million-toke
 
 ## Local Linux launcher candidate — 2026-10-14
 
-Branch `feature/linux-dual-launcher`, based on `9769c17`; changes remain local,
-uncommitted and unpushed. The distinct `claude-code-dual` executable implements
+Branch `feature/linux-dual-launcher`, based on `9769c17`, an experimental
+candidate (not released or installed). The distinct `claude-code-dual` executable implements
 offline `doctor`, `contract`, and real `launch [--claude PATH] [--resume ID]`.
 Launch preserves ordinary project settings, hooks, permissions, MCP and child
 environment. Detected auth/model conflicts fail rather than being bypassed.
@@ -92,7 +92,7 @@ user-settings changes, provider-secret reads, live calls, merges or releases.
 
 See [client evidence](docs/engineering/linux-client-evidence.md),
 [launcher guide](docs/src/content/docs/using/experimental-launcher.md) and
-[optional handoff](docs/engineering/HANDOFF.md). The workflow only prepares manual
+[agent working rules](AGENTS.md). The workflow only prepares manual
 Linux candidate artifacts; it cannot publish a release. The staging utility
 supports exact-version downloads with an independent SHA-256, approved HTTPS
 redirects and a bounded worker covering DNS through final reads. The 16 tests
@@ -101,7 +101,7 @@ download was made. Published assets and authenticated digest/bootstrap
 distribution are absent; a supplied hash alone does not authenticate a publisher. Inherited
 LRU advisories are still documented separately in DEPENDENCY-REVIEW.md.
 
-Continuation verification on 2026-10-14 preserved the uncommitted checkout and
+Continuation verification on 2026-10-14 preserved the task checkout and
 used the existing task-local Rust 1.99 toolchain/cache. The locked offline Rust
 suite again passed **1,150 tests, zero failures**; formatting, strict all-target
 Clippy and the locked offline build passed. All **16 installer/downloader** and
@@ -118,7 +118,7 @@ recipe uses agent frontmatter `model: gpt-6.1-sol[1m]`, `effort: medium`, loaded
 through Claude Code's agent discovery and invoked without a per-call override.
 Exact `gpt-6.1-sol` is registered; bare `gpt-6.1` returns HTTP 400. Astra remains
 the general-purpose default. This is user-reported mixed-model success, not an
-independent live test or proof of 1M capacity. The uncommitted `claude-code-dual`
+independent live test or proof of 1M capacity. The experimental `claude-code-dual`
 candidate remains fixed to Astra and rejects Sol. This follow-up changes docs
 only, preserves candidate implementation work, and reads/edits no personal
 settings or agent files. No live calls, commits, pushes or publication were made.

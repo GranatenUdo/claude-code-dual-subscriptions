@@ -1,6 +1,7 @@
 # Controlled Linux client evidence
 
-2026-10-14, WSL2 Ubuntu 26.04, x86_64/glibc 2.43. Actual client:
+Historical record (2026-10-14, Claude Code 2.1.299; the launcher has since been
+re-pinned to 2.1.300, see below). WSL2 Ubuntu 26.04, x86_64/glibc 2.43. Actual client:
 `/home/renade/.local/bin/claude` → `/home/renade/.local/share/claude/versions/2.1.299`.
 An isolated `--version` returned `2.1.299 (Claude Code)`.
 

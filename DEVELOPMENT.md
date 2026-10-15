@@ -55,3 +55,74 @@ Inherited LRU advisories remain unresolved; see [DEPENDENCY-REVIEW.md](DEPENDENC
 The user reports a working Opus 5.5 parent and general-purpose Astra subagent after setting `CLAUDE_CODE_SUBAGENT_MODEL=gpt-6-astra[1m]` in project-local settings and restarting through the same proxy-enabled launcher. The pre-restart probe used Opus; the post-restart transcript recorded `gpt-6-astra`. No full-ID per-call model argument was used.
 
 This evidence does not verify the explicit Opus reviewer exception, million-token inference, all refresh/history paths, or a complete live regression/security review. The unresolved dependency advisories remain. This documentation update makes no provider calls or user-project settings changes.
+
+## Local Linux launcher candidate — 2026-10-14
+
+Branch `feature/linux-dual-launcher`, based on `9769c17`; changes remain local,
+uncommitted and unpushed. The distinct `claude-code-dual` executable implements
+offline `doctor`, `contract`, and real `launch [--claude PATH] [--resume ID]`.
+Launch preserves ordinary project settings, hooks, permissions, MCP and child
+environment. Detected auth/model conflicts fail rather than being bypassed.
+
+Final local verification:
+
+- `cargo test --all --locked`: **1,150 passed, zero failures**, including nine
+  native Anthropic integration tests, five dual CLI tests and eight dual unit tests.
+- `cargo fmt --all -- --check`, strict all-target Clippy with `-D warnings`, and
+  `cargo build --all --locked`: passed.
+- Python installer/downloader tests: **16 passed**; fake-client PTY lifecycle tests: **4 passed**.
+- Actual Claude 2.1.299 in a bwrap network/filesystem namespace: **5 synthetic
+  scenarios passed** (saved OAuth/capability, Astra worker, Opus reviewer, resume,
+  safety hook and denied-tool policy). No real credentials or providers involved.
+- Docs: **25 pages built; 1,785 internal links/assets checked**.
+- Independent final source review: **no remaining blocking defect found** after
+  fixing redaction, installer locking/bounds, process-group cleanup, active request
+  cancellation, foreground ownership, signal codes and configuration conflicts.
+
+The initial real-client terminal marker failure was diagnosed as a harness issue
+(ANSI cursor positioning, zero PTY dimensions, render timing and an incorrect
+refusal exit-code assumption). All three corrected real-client terminal cases
+passed: direct trust refusal exits1, launcher trust refusal exits1, and launcher
+SIGTERM exits143. Normal trust gates were preserved. Full interactive
+conversation certification and Ctrl-Z/job-control remain unverified.
+Remote managed policy, intentionally daemonized descendants, live subscription
+acceptance/refresh, million-token capacity, broader fallback behavior and signed
+release distribution remain limitations/gates. There were no installations,
+user-settings changes, provider-secret reads, live calls, merges or releases.
+
+See [client evidence](docs/engineering/linux-client-evidence.md),
+[launcher guide](docs/src/content/docs/using/experimental-launcher.md) and
+[optional handoff](docs/engineering/HANDOFF.md). The workflow only prepares manual
+Linux candidate artifacts; it cannot publish a release. The staging utility
+supports exact-version downloads with an independent SHA-256, approved HTTPS
+redirects and a bounded worker covering DNS through final reads. The 16 tests
+include blocking-read termination and unchanged installation on failure. No real
+download was made. Published assets and authenticated digest/bootstrap
+distribution are absent; a supplied hash alone does not authenticate a publisher. Inherited
+LRU advisories are still documented separately in DEPENDENCY-REVIEW.md.
+
+Continuation verification on 2026-10-14 preserved the uncommitted checkout and
+used the existing task-local Rust 1.99 toolchain/cache. The locked offline Rust
+suite again passed **1,150 tests, zero failures**; formatting, strict all-target
+Clippy and the locked offline build passed. All **16 installer/downloader** and
+**four fake-client PTY** tests passed. The sandbox initially denied the PTY
+launcher's loopback listener; the approved rerun outside it passed with temporary
+homes and the fake client. Actual-Claude probes and the docs build were not rerun
+(Bun and docs dependencies are unavailable in this session). The implementation
+plan's stale checklist was reconciled with the existing client evidence; no source
+code, normal settings, installations or release state were changed.
+
+Documentation follow-up on 2026-10-14 records the user's report that named Sol
+agents work without changing the Astra environment default. The existing proxy
+recipe uses agent frontmatter `model: gpt-6.1-sol[1m]`, `effort: medium`, loaded
+through Claude Code's agent discovery and invoked without a per-call override.
+Exact `gpt-6.1-sol` is registered; bare `gpt-6.1` returns HTTP 400. Astra remains
+the general-purpose default. This is user-reported mixed-model success, not an
+independent live test or proof of 1M capacity. The uncommitted `claude-code-dual`
+candidate remains fixed to Astra and rejects Sol. This follow-up changes docs
+only, preserves candidate implementation work, and reads/edits no personal
+settings or agent files. No live calls, commits, pushes or publication were made.
+Documentation validation passed: `bun run build` generated 25 pages and
+`bun run check:links` checked 1,791 internal links/assets. Diff review and
+`git diff --check` passed; user-facing Aven/Grok references remain absent.
+No implementation tests were rerun for this docs-only follow-up.

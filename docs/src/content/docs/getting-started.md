@@ -8,6 +8,10 @@ Local mock tests passed. The user also confirmed Opus 5.5 parent + Astra subagen
 The commands below are for a user choosing to perform live testing. Other
 providers remain available in [their guides](/providers/choosing-a-provider/).
 
+This guide uses the existing `claude-code-proxy`. The separate uncommitted
+`claude-code-dual` launcher fixes workers to Astra and rejects Sol; the named Sol
+agent setup below does not extend that candidate's contract.
+
 ## 1. Build this fork
 
 Use Linux or Linux under WSL with Git, a C compiler/linker, and current stable
@@ -77,9 +81,16 @@ Settings-file environment variables and credential helpers can still override
 the saved login. Review them without printing secrets. This guide does not
 require changing your global Claude settings.
 
-## 6. Configure Astra subagents
+## 6. Keep Astra as default and optionally name a Sol agent
 
-Follow [Opus parent and Astra subagents](/using/subagents/): merge `CLAUDE_CODE_SUBAGENT_MODEL=gpt-6-astra[1m]` into project-local settings, restart through the same proxy-enabled launcher, and invoke general-purpose without a per-call model argument. The user confirmed this sequence works.
+Follow [Astra and named Sol subagents](/using/subagents/): merge `CLAUDE_CODE_SUBAGENT_MODEL=gpt-6-astra[1m]` into project-local settings and invoke general-purpose without a per-call model argument. The user confirmed this sequence after restarting through the same proxy-enabled launcher. If a restart is needed, wait for active agents/tasks to finish.
+
+For selected Sol tasks, leave the Astra default unchanged and use a named agent
+with frontmatter `model: gpt-6.1-sol[1m]` and `effort: medium`. Confirm it is loaded
+with `/agents`, then invoke its name without a per-call model override. See the
+[complete example and precedence](/using/subagents/#select-sol-for-a-named-agent).
+Bare `gpt-6.1` returns HTTP 400. Mixed Astra/Sol operation is user-reported, not
+independently live-tested here or evidence of million-token capacity.
 
 ## 7. Optional parent-model switching
 

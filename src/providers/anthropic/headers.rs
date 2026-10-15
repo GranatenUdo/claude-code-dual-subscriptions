@@ -14,6 +14,7 @@ pub(super) fn forwarded_headers(headers: &HeaderMap) -> HeaderMap {
             && !matches!(
                 name.as_str(),
                 "host"
+                    | "x-claude-dual-capability"
                     | "connection"
                     | "keep-alive"
                     | "proxy-authenticate"

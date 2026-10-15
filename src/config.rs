@@ -5,6 +5,15 @@ use std::path::{Path, PathBuf};
 
 use crate::paths;
 
+static DUAL_SESSION_DEFAULTS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Dedicated launcher only: ignore the legacy proxy's mutable configuration,
+/// while keeping its separately managed Codex credential location unchanged.
+pub(crate) fn use_dual_session_defaults() {
+    DUAL_SESSION_DEFAULTS.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AliasProvider {
     Anthropic,
@@ -134,6 +143,9 @@ fn parse_alias(raw: &str) -> Option<AliasProvider> {
 }
 
 fn read_file_config(config_dir: &Path) -> Option<FileConfig> {
+    if DUAL_SESSION_DEFAULTS.load(std::sync::atomic::Ordering::SeqCst) {
+        return None;
+    }
     let path = config_dir.join("config.json");
     let raw = fs::read_to_string(path).ok()?;
     serde_json::from_str(&raw).ok()

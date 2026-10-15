@@ -23,6 +23,56 @@ use tokio::{
 };
 use tower::ServiceExt;
 
+#[tokio::test]
+async fn local_capability_never_reaches_native_upstream() {
+    use claude_code_proxy::dual::security::{CAPABILITY_HEADER, Capability, protect};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let hits = Arc::new(AtomicUsize::new(0));
+    let observed = hits.clone();
+    let upstream = upstream(Router::new().route(
+        "/v1/messages",
+        post(move |headers: HeaderMap| {
+            let observed = observed.clone();
+            async move {
+                assert!(!headers.contains_key(CAPABILITY_HEADER));
+                assert_eq!(headers["authorization"], "Bearer claude-subscription");
+                observed.fetch_add(1, Ordering::SeqCst);
+                axum::Json(json!({"id":"mock", "content":[]}))
+            }
+        }),
+    ))
+    .await;
+    let cap = Capability::generate();
+    let monitor = MonitorHandle::default();
+    let app = protect(proxy(&upstream, &monitor), cap.clone());
+    for supplied in [None, Some("wrong")] {
+        let mut req = request(
+            "/v1/messages",
+            r#"{"model":"claude-opus-5-5","messages":[]}"#,
+        );
+        if let Some(value) = supplied {
+            req.headers_mut()
+                .insert(CAPABILITY_HEADER, value.parse().unwrap());
+        }
+        assert_eq!(
+            app.clone().oneshot(req).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    assert_eq!(hits.load(Ordering::SeqCst), 0);
+    let mut req = request(
+        "/v1/messages",
+        r#"{"model":"claude-opus-5-5","messages":[]}"#,
+    );
+    let header = cap.child_header();
+    req.headers_mut().insert(
+        CAPABILITY_HEADER,
+        header.split_once(": ").unwrap().1.parse().unwrap(),
+    );
+    assert_eq!(app.oneshot(req).await.unwrap().status(), StatusCode::OK);
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+}
+
 struct Upstream {
     url: reqwest::Url,
     task: JoinHandle<()>,
@@ -169,7 +219,7 @@ async fn streams_before_completion_and_observes_fragmented_usage() {
 async fn token_counting_applies_the_same_model_and_thinking_conversion() {
     let upstream = upstream(Router::new().route("/v1/messages/count_tokens", post(|headers: HeaderMap, axum::Json(body): axum::Json<Value>| async move {
         assert_eq!(headers["authorization"], "Bearer claude-subscription");
-        assert_eq!(body["model"], "claude-opus-5");
+        assert_eq!(body["model"], "claude-opus-5-5");
         assert_eq!(body["messages"][0]["content"][0], json!({"type":"text","text":"<previous_reasoning>\nGPT summary\n</previous_reasoning>"}));
         axum::Json(json!({"input_tokens":42}))
     }))).await;

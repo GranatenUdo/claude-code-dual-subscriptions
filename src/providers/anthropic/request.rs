@@ -7,7 +7,7 @@ pub(super) fn resolve_model(model: &str) -> &str {
     match model {
         "haiku" => "claude-haiku-4-5",
         "sonnet" => "claude-sonnet-5",
-        "opus" => "claude-opus-5",
+        "opus" => "claude-opus-5-5",
         "fable" => "claude-fable-5",
         _ => model,
     }
@@ -109,10 +109,10 @@ mod tests {
         let raw = Bytes::from_static(br#"{"model":"opus[1m]","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"native","signature":"opaque"}]}]}"#);
         let prepared = prepare_body(raw, resolve_model("opus")).unwrap();
         let document: Value = serde_json::from_slice(&prepared).unwrap();
-        assert_eq!(document["model"], "claude-opus-5");
+        assert_eq!(document["model"], "claude-opus-5-5");
         assert_eq!(document["messages"][0]["content"][0]["signature"], "opaque");
         assert_eq!(
-            prepare_body(prepared.clone(), "claude-opus-5").unwrap(),
+            prepare_body(prepared.clone(), "claude-opus-5-5").unwrap(),
             prepared
         );
     }

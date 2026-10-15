@@ -134,14 +134,14 @@ Re-pinned to Claude Code **2.1.300** (pinned copy, sha256
 unchanged synthetic contract probe passed all five scenarios. WSL2 Ubuntu 26.04,
 x86_64, Rust 1.99.0, separate `CARGO_TARGET_DIR` and temporary `HOME`.
 
-- `cargo test --all --locked`: **1,189 passed, zero failures** (baseline 1,150).
+- `cargo test --all --locked`: **1,190 passed, zero failures** (baseline 1,150).
   Formatting, strict all-target Clippy (`-D warnings`) and the locked build passed.
-- Python: **16** installer/downloader tests and **10** PTY tests. The PTY tests run
+- Python: **16** installer/downloader tests and **11** PTY tests. The PTY tests run
   the launcher as a job of an interactive bash and cover three Ctrl-Z/`fg` cycles,
-  `bg` completion with the shell keeping the terminal, `kill %1` of a suspended
+  `bg` completion with the shell keeping the terminal, `fg` after `bg`, `kill %1` of a suspended
   job (143), SIGHUP (129), the orphaned process group case, and terminal modes
   restored after a child killed in raw mode.
-- Docs: **25 pages built; 1,794 internal links/assets checked** (bun 1.3.13).
+- Docs: **25 pages built; 1,795 internal links/assets checked** (bun 1.3.13).
 - Actual-client certification matrix, `scripts/certify.py --client <pinned>`:
   the real Claude 2.1.300 interface drives the production launcher preflight,
   environment scoping, capability layer, router and supervisor, built as the

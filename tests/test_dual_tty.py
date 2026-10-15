@@ -165,6 +165,57 @@ except KeyboardInterrupt:
     def test_background_launcher_does_not_steal_terminal(self):
         self.run_case(False, background=True)
 
+    def test_terminal_modes_are_restored_when_the_child_cannot(self):
+        """A child killed in raw mode must not leave the terminal broken."""
+        import termios
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            client = root / 'claude'
+            client.write_text('''#!/usr/bin/python3
+import signal,sys,termios,time,tty
+if '--version' in sys.argv:
+    print('2.1.300 (Claude Code)'); sys.exit(0)
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+tty.setraw(0)
+print('RAW_READY',flush=True)
+time.sleep(60)
+''')
+            client.chmod(0o700)
+            pid, fd = pty.fork()
+            if pid == 0:
+                os.chdir(root)
+                (root / 'before').write_text(repr(termios.tcgetattr(0)[:4]))
+                os.execve(BINARY, [str(BINARY), 'launch', '--claude', str(client)],
+                    {'HOME': folder, 'PATH': '/usr/bin:/bin', 'TERM': 'dumb'})
+            output = b''
+            status = None
+            try:
+                deadline = time.monotonic() + 15
+                sent = False
+                while time.monotonic() < deadline:
+                    if select.select([fd], [], [], .1)[0]:
+                        try:
+                            output += os.read(fd, 4096)
+                        except OSError as error:
+                            if error.errno != errno.EIO:
+                                raise
+                    if b'RAW_READY' in output and not sent:
+                        os.kill(pid, signal.SIGTERM)
+                        sent = True
+                    done, value = os.waitpid(pid, os.WNOHANG)
+                    if done:
+                        status = value
+                        break
+                self.assertTrue(sent, output)
+                self.assertIsNotNone(status, 'launcher did not finish')
+                self.assertEqual(os.waitstatus_to_exitcode(status), 143)
+                self.assertEqual(repr(termios.tcgetattr(fd)[:4]), (root / 'before').read_text())
+            finally:
+                if status is None:
+                    os.kill(pid, signal.SIGKILL)
+                    os.waitpid(pid, 0)
+                os.close(fd)
+
 
 class JobControlTests(unittest.TestCase):
     def start(self, mode):

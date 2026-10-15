@@ -1,4 +1,5 @@
 //! Experimental Linux/WSL entry point. Real-client authentication is not certified.
+pub mod cli;
 pub mod doctor;
 pub mod launch;
 pub mod security;

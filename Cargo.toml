@@ -49,6 +49,12 @@ crossterm = "0.28"
 jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 tiktoken-rs = { version = "0.12", default-features = false }
 
+# Test-only certification harness driven by scripts/certify.py; skips when
+# run by `cargo test` without arguments.
+[[test]]
+name = "dual_certification"
+harness = false
+
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
 tempfile = "3.14"

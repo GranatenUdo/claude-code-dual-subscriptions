@@ -89,6 +89,12 @@ impl CodexProvider {
             client: Arc::new(CodexHttpClient::new()),
         }
     }
+
+    /// Uses a caller-built client, for example one pointed at a local mock
+    /// upstream in tests.
+    pub fn with_client(client: Arc<CodexHttpClient>) -> Self {
+        Self { client }
+    }
 }
 
 impl CodexProvider {

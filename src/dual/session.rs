@@ -78,6 +78,10 @@ impl LaunchSpec {
     }
 }
 
+/// How long a terminated child may take to exit cleanly before its group is
+/// killed; Claude restores terminal modes and saves the session on SIGTERM.
+const CHILD_TERMINATION_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Experimental session supervisor used by the Linux launcher. The caller
 /// must supply a router containing only fixed approved destinations. This accepts
 /// no URL or capability via argv. Real-client TTY/signal/resume validation is pending.
@@ -148,10 +152,17 @@ pub async fn supervise(
             unsafe {
                 // Only the process group created for this child. Descendants
                 // that intentionally daemonize are outside the session contract.
-                // SIGCONT lets a suspended group act on the termination request.
+                // SIGCONT lets a suspended group act on the termination request;
+                // the leader gets a short grace period to restore the terminal
+                // and save the session before the group is killed.
                 libc::kill(-(self.0.id() as i32), libc::SIGTERM);
                 libc::kill(-(self.0.id() as i32), libc::SIGCONT);
-                std::thread::sleep(std::time::Duration::from_millis(150));
+                let deadline = std::time::Instant::now() + CHILD_TERMINATION_GRACE;
+                while std::time::Instant::now() < deadline
+                    && peek_exit_code(&mut self.0).ok().flatten().is_none()
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
                 libc::kill(-(self.0.id() as i32), libc::SIGKILL);
             }
             #[cfg(not(unix))]
@@ -241,33 +252,49 @@ fn with_sigttou_blocked<T>(f: impl FnOnce() -> T) -> T {
 }
 
 /// Gives the child's group the terminal and returns it on exit, but only while
-/// the child still owns it: after `bg` the shell's group must keep it.
-struct TerminalGuard(Option<(i32, i32)>);
+/// the child still owns it: after `bg` the shell's group must keep it. The
+/// terminal modes saved at launch are restored with it, so a child killed
+/// before it could reset raw mode does not leave the shell's terminal broken.
+#[cfg(unix)]
+struct TerminalGuard(Option<(i32, i32, Option<libc::termios>)>);
+#[cfg(not(unix))]
+struct TerminalGuard;
 impl TerminalGuard {
     fn foreground(child: u32) -> Self {
         #[cfg(unix)]
         unsafe {
             let previous = libc::tcgetpgrp(libc::STDIN_FILENO);
             if previous >= 0 {
+                let mut modes: libc::termios = std::mem::zeroed();
+                let modes = (libc::tcgetattr(libc::STDIN_FILENO, &mut modes) == 0).then_some(modes);
                 let result =
                     with_sigttou_blocked(|| libc::tcsetpgrp(libc::STDIN_FILENO, child as i32));
                 if result == 0 {
                     libc::kill(-(child as i32), libc::SIGCONT);
-                    return Self(Some((previous, child as i32)));
+                    return Self(Some((previous, child as i32, modes)));
                 }
             }
+            Self(None)
         }
-        let _ = child;
-        Self(None)
+        #[cfg(not(unix))]
+        {
+            let _ = child;
+            Self
+        }
     }
 }
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         #[cfg(unix)]
-        if let Some((previous, child)) = self.0 {
+        if let Some((previous, child, modes)) = self.0 {
             unsafe {
                 if libc::tcgetpgrp(libc::STDIN_FILENO) == child {
-                    with_sigttou_blocked(|| libc::tcsetpgrp(libc::STDIN_FILENO, previous));
+                    with_sigttou_blocked(|| {
+                        libc::tcsetpgrp(libc::STDIN_FILENO, previous);
+                        if let Some(modes) = modes {
+                            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &modes);
+                        }
+                    });
                 }
             }
         }

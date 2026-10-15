@@ -1,34 +1,8 @@
-use clap::{Parser, Subcommand};
-use claude_code_proxy::dual;
-
-#[derive(Parser)]
-#[command(
-    name = "claude-code-dual",
-    about = "Experimental Linux/WSL dual-session launcher",
-    version
-)]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Subcommand)]
-enum Command {
-    /// Inspect configuration offline without executing Claude, helpers, hooks or MCP.
-    Doctor {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show the fixed session model contract and validation status.
-    Contract,
-    /// Start an owned loopback listener and a scoped session on the pinned Claude Code version.
-    Launch {
-        #[arg(long)]
-        claude: Option<std::path::PathBuf>,
-        #[arg(long)]
-        resume: Option<String>,
-    },
-}
+use clap::Parser;
+use claude_code_proxy::dual::{
+    self,
+    cli::{Cli, Command},
+};
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();

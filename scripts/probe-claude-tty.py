@@ -32,7 +32,8 @@ if pid == 0:
     program = '/client' if action == 'direct-decline' else '/launcher'
     args = [program, '--model', 'claude-opus-5-5'] if action == 'direct-decline' else [program, 'launch', '--claude', '/client']
     os.execve(program, args,
-        {'HOME': '/home/test', 'PATH': '/usr/bin:/bin', 'TERM': 'xterm-256color', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC': '1'})
+        {'HOME': '/home/test', 'PATH': '/usr/bin:/bin', 'TERM': 'xterm-256color',
+         'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC': '1', 'DISABLE_AUTOUPDATER': '1'})
 output = b''
 status = None
 sent = False

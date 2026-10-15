@@ -16,10 +16,44 @@ const CHILD_ENV: &[&str] = &[
     "TMPDIR",
 ];
 
+/// A launch that passed every preflight check and has not touched the
+/// process environment yet.
+pub struct Prepared {
+    spec: LaunchSpec,
+    proxy_only: BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for Prepared {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Prepared([environment redacted])")
+    }
+}
+
+/// Production launch: preflight, scoped environment, fixed upstreams.
+///
 /// # Safety
 /// Call only from the CLI main thread before starting any threads: this scopes
 /// the process environment for the fixed provider runtime.
 pub unsafe fn run(client: Option<PathBuf>, resume: Option<String>) -> anyhow::Result<i32> {
+    let prepared = unsafe { preflight(client, resume)? };
+    unsafe { scope_environment(&prepared) };
+    let router = router(
+        crate::providers::anthropic::AnthropicProvider::new(),
+        crate::providers::codex::CodexProvider::new(),
+    );
+    run_prepared(prepared, router)
+}
+
+/// Validates configuration, the client executable and its exact version.
+/// Starts no listener and leaves the environment unchanged.
+///
+/// # Safety
+/// Call only from the main thread before starting any threads: the version
+/// check spawns the client with the current environment.
+pub unsafe fn preflight(
+    client: Option<PathBuf>,
+    resume: Option<String>,
+) -> anyhow::Result<Prepared> {
     anyhow::ensure!(cfg!(target_os = "linux"), "launch supports Linux/WSL2 only");
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -145,33 +179,53 @@ pub unsafe fn run(client: Option<PathBuf>, resume: Option<String>) -> anyhow::Re
         "Claude version is not validated {}; output redacted; no listener was started",
         super::CLIENT_VERSION
     );
-    // This entry point is called from the synchronous binary before any runtime
-    // or thread exists. Remove inherited provider endpoints, proxies, logging,
-    // auth and model overrides; nothing is written back to the user's shell.
+    Ok(Prepared { spec, proxy_only })
+}
+
+/// Removes inherited provider endpoints, proxies, logging, auth and model
+/// overrides and selects the fixed dual-session defaults. Nothing is written
+/// back to the user's shell.
+///
+/// # Safety
+/// No other thread may exist: this mutates the process environment.
+pub unsafe fn scope_environment(prepared: &Prepared) {
     for (key, _) in std::env::vars_os() {
         unsafe {
             std::env::remove_var(key);
         }
     }
-    for (key, value) in &proxy_only {
+    for (key, value) in &prepared.proxy_only {
         unsafe {
             std::env::set_var(key, value);
         }
     }
     crate::config::use_dual_session_defaults();
+}
+
+/// The only router a dual session serves: native Claude and Codex, nothing
+/// else. Production passes fixed-upstream providers.
+pub fn router(
+    anthropic: crate::providers::anthropic::AnthropicProvider,
+    codex: crate::providers::codex::CodexProvider,
+) -> axum::Router {
     let registry = crate::registry::Registry::from_providers(
         crate::config::AliasProvider::Anthropic,
         vec![
-            Arc::new(crate::providers::anthropic::AnthropicProvider::new())
-                as Arc<dyn crate::provider::Provider>,
-            Arc::new(crate::providers::codex::CodexProvider::new()),
+            Arc::new(anthropic) as Arc<dyn crate::provider::Provider>,
+            Arc::new(codex),
         ],
     );
-    let router = crate::server::app_with_features(
+    crate::server::app_with_features(
         Arc::new(registry),
         None,
         crate::server::AppFeatures::default(),
-    );
+    )
+}
+
+/// Supervises the session on the calling (main) thread until the child exits
+/// or the launcher receives a termination signal.
+pub fn run_prepared(prepared: Prepared, router: axum::Router) -> anyhow::Result<i32> {
+    let spec = prepared.spec;
     let hangup_ignored = sighup_ignored();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

@@ -27,7 +27,8 @@ use crate::anthropic::schema::{CountTokensResponse, MessagesRequest};
 use crate::anthropic::sse::parse_sse_events;
 use crate::config;
 use crate::logging::create_logger;
-use crate::monitor::usage_from_anthropic_sse;
+use crate::monitor::{TokenUsage, usage_from_anthropic_sse};
+use crate::pricing::PriceTier;
 use crate::provider::{CliHandlers, Provider, RequestContext};
 use crate::registry;
 use crate::request_identity::ConversationIdentity;
@@ -180,7 +181,14 @@ impl CodexProvider {
             let input_tokens = search::search_request_input_tokens(&search_request);
             let output_tokens = search::search_response_output_tokens(&search_response);
             if let Some(monitor) = ctx.monitor.as_ref() {
+                monitor.pricing_resolved(
+                    &ctx.req_id,
+                    &resolved.model,
+                    PriceTier::from_service_tier(resolved.service_tier.as_ref()),
+                );
+                // Search token counts are local estimates, not provider usage.
                 monitor.usage_updated(&ctx.req_id, Some(input_tokens), Some(output_tokens));
+                monitor.cost_estimated(&ctx.req_id);
             }
             return search::anthropic_search_response(
                 &search_response,
@@ -215,6 +223,15 @@ impl CodexProvider {
                 );
             }
         };
+        if let Some(monitor) = ctx.monitor.as_ref() {
+            // The translated request carries the effective tier, including a
+            // configured service-tier override.
+            monitor.pricing_resolved(
+                &ctx.req_id,
+                &translated.model,
+                PriceTier::from_service_tier(translated.service_tier.as_ref()),
+            );
+        }
 
         let compact_boundary = is_compact_messages_request(&body);
         let server_compaction_enabled = config::codex_server_compaction();
@@ -492,12 +509,15 @@ impl CodexProvider {
             ) {
                 Ok(json) => {
                     if let Some(monitor) = ctx.monitor.as_ref() {
-                        monitor.usage_updated(
-                            &ctx.req_id,
-                            json.pointer("/usage/input_tokens").and_then(|v| v.as_u64()),
-                            json.pointer("/usage/output_tokens")
-                                .and_then(|v| v.as_u64()),
-                        );
+                        match reported_upstream_usage(&upstream.body) {
+                            Some(usage) => monitor.usage_final(&ctx.req_id, token_usage(&usage)),
+                            None => monitor.usage_updated(
+                                &ctx.req_id,
+                                json.pointer("/usage/input_tokens").and_then(|v| v.as_u64()),
+                                json.pointer("/usage/output_tokens")
+                                    .and_then(|v| v.as_u64()),
+                            ),
+                        }
                     }
                     update_continuation_from_upstream(
                         ctx.session_id.as_deref(),
@@ -947,7 +967,7 @@ async fn live_stream_response_once(
         }
         if translator.has_semantic_output() && !pending_chunk.is_empty() {
             record_live_stream_downstream_capture(&ctx, &pending_chunk);
-            record_live_stream_progress(&ctx, &pending_chunk);
+            record_live_stream_progress(&ctx, &pending_chunk, &translator);
             if terminal {
                 update_continuation_from_upstream(
                     ctx.session_id.as_deref(),
@@ -985,7 +1005,7 @@ async fn live_stream_response_once(
                 return LiveStreamStart::Response(empty_live_stream_response());
             }
             record_live_stream_downstream_capture(&ctx, &pending_chunk);
-            record_live_stream_progress(&ctx, &pending_chunk);
+            record_live_stream_progress(&ctx, &pending_chunk, &translator);
             return LiveStreamStart::Response(single_live_stream_response(pending_chunk));
         }
     }
@@ -1049,17 +1069,65 @@ fn record_live_stream_downstream_capture(ctx: &RequestContext, chunk: &[u8]) {
     }
 }
 
-fn record_live_stream_progress(ctx: &RequestContext, chunk: &[u8]) {
-    if let Some(monitor) = ctx.monitor.as_ref() {
-        let (input_tokens, output_tokens) = usage_from_anthropic_sse(chunk);
-        monitor.stream_progress(
+fn record_live_stream_progress(
+    ctx: &RequestContext,
+    chunk: &[u8],
+    translator: &LiveStreamTranslator,
+) {
+    let Some(monitor) = ctx.monitor.as_ref() else {
+        return;
+    };
+    let (input_tokens, output_tokens) = usage_from_anthropic_sse(chunk);
+    let bytes = chunk.len() as u64;
+    let events = count_sse_events(chunk);
+    // message_start carries a local token estimate until the terminal event
+    // reports provider usage.
+    if sse_has_event(chunk, "message_start") {
+        monitor.stream_progress_estimated_input(
             &ctx.req_id,
-            chunk.len() as u64,
-            count_sse_events(chunk),
+            bytes,
+            events,
             input_tokens,
             output_tokens,
         );
+    } else {
+        monitor.stream_progress(&ctx.req_id, bytes, events, input_tokens, output_tokens);
     }
+    // Published before the chunk is sent, so the request is still active.
+    if let Some(usage) = translator.final_usage() {
+        monitor.usage_final(&ctx.req_id, token_usage(usage));
+    }
+}
+
+fn sse_has_event(chunk: &[u8], name: &str) -> bool {
+    parse_sse_events(chunk)
+        .iter()
+        .any(|event| event.event.as_deref() == Some(name))
+}
+
+pub(crate) fn token_usage(usage: &translate::reducer::CodexUsage) -> TokenUsage {
+    TokenUsage::from_openai(
+        usage.input_tokens,
+        usage.input_tokens_details_cached,
+        usage.output_tokens,
+    )
+}
+
+/// Provider-reported usage from the terminal event of a buffered upstream
+/// stream, or `None` when upstream sent no usage.
+pub(crate) fn reported_upstream_usage(
+    upstream_sse: &[u8],
+) -> Option<translate::reducer::CodexUsage> {
+    parse_sse_events(upstream_sse)
+        .into_iter()
+        .rev()
+        .find_map(|event| {
+            let payload: serde_json::Value = serde_json::from_str(&event.data).ok()?;
+            let response = payload.get("response")?;
+            response.get("usage")?;
+            let usage = translate::reducer::parse_codex_usage(response);
+            (usage.input_tokens.is_some() || usage.output_tokens.is_some()).then_some(usage)
+        })
 }
 
 fn single_live_stream_response(chunk: Vec<u8>) -> Response {
@@ -1111,7 +1179,7 @@ fn remaining_live_stream_response(
                 _ = heartbeat.tick() => {
                     let chunk = translator.ping_chunk(ctx.traffic.as_deref());
                     if !chunk.is_empty() {
-                        record_live_stream_progress(&ctx, &chunk);
+                        record_live_stream_progress(&ctx, &chunk, &translator);
                         if tx.send(Ok(Bytes::from(chunk))).await.is_err() {
                             abort_request_state(
                                 ctx.session_id.as_deref(),
@@ -1155,14 +1223,14 @@ fn remaining_live_stream_response(
                                 ctx.traffic.as_deref(),
                             );
                             if !chunk.is_empty() {
-                                record_live_stream_progress(&ctx, &chunk);
+                                record_live_stream_progress(&ctx, &chunk, &translator);
                                 let _ = tx.send(Ok(Bytes::from(chunk))).await;
                             }
                             return;
                         }
                     };
                     if !chunk.is_empty() {
-                        record_live_stream_progress(&ctx, &chunk);
+                        record_live_stream_progress(&ctx, &chunk, &translator);
                         if tx.send(Ok(Bytes::from(chunk))).await.is_err() {
                             abort_request_state(
                                 ctx.session_id.as_deref(),
@@ -1195,7 +1263,7 @@ fn remaining_live_stream_response(
                         let chunk = translator
                             .finish_after_closed_completed_tool_call(ctx.traffic.as_deref());
                         if !chunk.is_empty() {
-                            record_live_stream_progress(&ctx, &chunk);
+                            record_live_stream_progress(&ctx, &chunk, &translator);
                             let _ = tx.send(Ok(Bytes::from(chunk))).await;
                             return;
                         }
@@ -1207,7 +1275,7 @@ fn remaining_live_stream_response(
                         ctx.traffic.as_deref(),
                     );
                     if !chunk.is_empty() {
-                        record_live_stream_progress(&ctx, &chunk);
+                        record_live_stream_progress(&ctx, &chunk, &translator);
                         let _ = tx.send(Ok(Bytes::from(chunk))).await;
                     }
                     return;
@@ -1222,7 +1290,7 @@ fn remaining_live_stream_response(
         );
         let chunk = translator.finish_after_closed_completed_tool_call(ctx.traffic.as_deref());
         if !chunk.is_empty() {
-            record_live_stream_progress(&ctx, &chunk);
+            record_live_stream_progress(&ctx, &chunk, &translator);
             let _ = tx.send(Ok(Bytes::from(chunk))).await;
             return;
         }
@@ -1232,7 +1300,7 @@ fn remaining_live_stream_response(
             ctx.traffic.as_deref(),
         );
         if !chunk.is_empty() {
-            record_live_stream_progress(&ctx, &chunk);
+            record_live_stream_progress(&ctx, &chunk, &translator);
             let _ = tx.send(Ok(Bytes::from(chunk))).await;
         }
     });
@@ -1946,11 +2014,145 @@ mod tests {
         };
         let chunk = b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":12,\"output_tokens\":48}}\n\n";
 
-        record_live_stream_progress(&ctx, chunk);
+        record_live_stream_progress(
+            &ctx,
+            chunk,
+            &LiveStreamTranslator::new("msg", "gpt-6-astra"),
+        );
 
         let state = monitor.snapshot();
         assert_eq!(state.active[0].input_tokens, Some(12));
         assert_eq!(state.active[0].output_tokens, Some(48));
+    }
+
+    fn priced_live_context(monitor: &crate::monitor::MonitorHandle) -> RequestContext {
+        monitor.request_started(
+            "request",
+            Some("session".to_string()),
+            None,
+            crate::monitor::EndpointKind::Messages,
+        );
+        monitor.provider_selected("request", "codex", "gpt-6-astra", None);
+        monitor.pricing_resolved("request", "gpt-6-astra", PriceTier::Standard);
+        RequestContext {
+            req_id: "request".to_string(),
+            session_id: Some("session".to_string()),
+            session_seq: None,
+            provider: "codex".to_string(),
+            traffic: None,
+            monitor: Some(monitor.clone()),
+        }
+    }
+
+    fn feed_live(
+        ctx: &RequestContext,
+        translator: &mut LiveStreamTranslator,
+        payload: serde_json::Value,
+    ) -> Vec<u8> {
+        let chunk = translator.accept(&payload, None).unwrap();
+        record_live_stream_progress(ctx, &chunk, translator);
+        chunk
+    }
+
+    #[test]
+    fn live_stream_final_usage_replaces_estimate_in_request_and_session() {
+        let monitor = crate::monitor::MonitorHandle::new(10);
+        let ctx = priced_live_context(&monitor);
+        let mut translator =
+            LiveStreamTranslator::with_estimated_input_tokens("msg", "gpt-6-astra", 50_000);
+        feed_live(
+            &ctx,
+            &mut translator,
+            serde_json::json!({"type": "response.output_text.delta", "output_index": 0, "delta": "hi"}),
+        );
+        let started = monitor.snapshot();
+        assert_eq!(started.active[0].input_tokens, Some(50_000));
+        let cost = started.active[0].usage_detail.cost.clone().unwrap();
+        assert!(cost.estimated);
+        assert_eq!(started.sessions[0].input_tokens, 50_000);
+
+        let finished = feed_live(
+            &ctx,
+            &mut translator,
+            serde_json::json!({
+                "type": "response.completed",
+                "response": {
+                    "id": "resp",
+                    "status": "completed",
+                    "usage": {
+                        "input_tokens": 1_200,
+                        "input_tokens_details": {"cached_tokens": 1_000},
+                        "output_tokens": 30
+                    }
+                }
+            }),
+        );
+        // The client-facing usage is unchanged by monitor accounting.
+        let delta = parse_sse_events(&finished)
+            .into_iter()
+            .filter_map(|event| serde_json::from_str::<serde_json::Value>(&event.data).ok())
+            .find(|value| value["type"] == "message_delta")
+            .unwrap();
+        assert_eq!(
+            delta["usage"],
+            serde_json::json!({
+                "input_tokens": 200,
+                "output_tokens": 30,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 1_000
+            })
+        );
+        let state = monitor.snapshot();
+        let request = &state.active[0];
+        assert_eq!(request.input_tokens, Some(200));
+        assert_eq!(request.usage_detail.cache_read_tokens, Some(1_000));
+        assert_eq!(request.output_tokens, Some(30));
+        let cost = request.usage_detail.cost.clone().unwrap();
+        assert!(!cost.estimated);
+        // 200 x $10 + 1,000 x $1 + 30 x $50 per MTok = $0.0045.
+        assert_eq!(cost.micros, Some(4_500));
+        assert_eq!(state.sessions[0].input_tokens, 200);
+        assert_eq!(state.sessions[0].cost.micros, 4_500);
+        assert_eq!(state.cost.micros, 4_500);
+    }
+
+    #[test]
+    fn live_stream_without_final_usage_keeps_flagged_estimate() {
+        let monitor = crate::monitor::MonitorHandle::new(10);
+        let ctx = priced_live_context(&monitor);
+        let mut translator =
+            LiveStreamTranslator::with_estimated_input_tokens("msg", "gpt-6-astra", 10_000);
+        feed_live(
+            &ctx,
+            &mut translator,
+            serde_json::json!({"type": "response.output_text.delta", "output_index": 0, "delta": "hi"}),
+        );
+        feed_live(
+            &ctx,
+            &mut translator,
+            serde_json::json!({
+                "type": "response.completed",
+                "response": {"id": "resp", "status": "completed", "usage": {}}
+            }),
+        );
+        assert!(translator.final_usage().is_none());
+        let state = monitor.snapshot();
+        assert_eq!(state.active[0].input_tokens, Some(10_000));
+        let cost = state.active[0].usage_detail.cost.clone().unwrap();
+        assert!(cost.estimated);
+        assert_eq!(cost.micros, Some(100_000));
+        assert_eq!(state.cost.estimated, 1);
+    }
+
+    #[test]
+    fn buffered_upstream_usage_is_read_from_the_terminal_event() {
+        let body = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"x\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":50,\"input_tokens_details\":{\"cached_tokens\":40},\"output_tokens\":7}}}\n\n";
+        let usage = token_usage(&reported_upstream_usage(body).unwrap());
+        assert_eq!(usage.input, Some(10));
+        assert_eq!(usage.cache_read, Some(40));
+        assert_eq!(usage.output, Some(7));
+        let unreported = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{}}}\n\n";
+        assert!(reported_upstream_usage(unreported).is_none());
     }
 
     #[tokio::test]

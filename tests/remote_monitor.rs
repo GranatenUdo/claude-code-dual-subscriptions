@@ -318,3 +318,47 @@ async fn incompatible_protocol_and_disabled_collection_report_attach_errors() {
         .unwrap();
     assert!(format!("{error:#}").contains("404"));
 }
+
+#[tokio::test]
+async fn new_viewer_attaches_to_a_proxy_without_cost_fields() {
+    let monitor = MonitorHandle::default();
+    monitor.request_started("legacy", Some("s".into()), Some(1), EndpointKind::Messages);
+    monitor.provider_selected("legacy", "codex", "gpt-6-astra", None);
+    monitor.request_completed("legacy", 200, Some(10), Some(5));
+    let mut legacy = serde_json::to_value(MonitorResponse::from(monitor.snapshot())).unwrap();
+    let snapshot = legacy["snapshot"].as_object_mut().unwrap();
+    snapshot.remove("cost");
+    snapshot.remove("prices_as_of");
+    for list in ["recent", "active", "sessions"] {
+        for item in snapshot[list].as_array_mut().unwrap() {
+            let item = item.as_object_mut().unwrap();
+            for field in [
+                "cost",
+                "cache_read_tokens",
+                "cache_write_5m_tokens",
+                "cache_write_1h_tokens",
+            ] {
+                item.remove(field);
+            }
+        }
+    }
+    let legacy = Arc::new(legacy);
+    let server = serve(Router::new().route(
+        "/monitor",
+        get(move || {
+            let legacy = legacy.clone();
+            async move { Json((*legacy).clone()) }
+        }),
+    ))
+    .await;
+    let viewer = RemoteMonitor::connect(client(), server.url.clone())
+        .await
+        .unwrap();
+    let update = viewer.snapshot();
+    let snapshot = update.snapshot();
+    assert_eq!(snapshot.recent[0].request_id, "legacy");
+    assert_eq!(snapshot.recent[0].input_tokens, Some(10));
+    assert_eq!(snapshot.recent[0].cost, None);
+    assert_eq!(snapshot.sessions[0].cost, None);
+    assert_eq!(snapshot.cost, None);
+}

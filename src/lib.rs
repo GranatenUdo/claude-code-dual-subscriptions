@@ -6,6 +6,7 @@ pub mod logging;
 pub mod monitor;
 pub mod openai_compat;
 pub mod paths;
+pub mod pricing;
 pub mod project;
 pub mod provider;
 pub mod providers;

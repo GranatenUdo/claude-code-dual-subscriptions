@@ -70,6 +70,8 @@ pub struct LiveStreamTranslator {
     // Seeds Claude Code's live subagent counter until the provider returns
     // authoritative usage in the terminal message_delta.
     estimated_input_tokens: u64,
+    // Provider-reported usage from the terminal event, when upstream sent any.
+    final_usage: Option<CodexUsage>,
     incomplete_response_policy: IncompleteResponsePolicy,
     finished: bool,
 }
@@ -100,6 +102,7 @@ impl LiveStreamTranslator {
             deferred_text: Vec::new(),
             semantic_output_started: false,
             estimated_input_tokens,
+            final_usage: None,
             incomplete_response_policy: IncompleteResponsePolicy::Error,
             finished: false,
         }
@@ -188,6 +191,12 @@ impl LiveStreamTranslator {
         }
 
         Ok(out)
+    }
+
+    /// Usage the provider reported in the terminal event; `None` until then,
+    /// or when the terminal event carried no usage.
+    pub fn final_usage(&self) -> Option<&CodexUsage> {
+        self.final_usage.as_ref()
     }
 
     pub fn is_finished(&self) -> bool {
@@ -934,6 +943,8 @@ impl LiveStreamTranslator {
         out: &mut Vec<u8>,
     ) {
         let mapped = map_codex_usage_to_anthropic(&usage, Some(self.web_search_requests));
+        self.final_usage =
+            usage.filter(|usage| usage.input_tokens.is_some() || usage.output_tokens.is_some());
         self.emit(
             traffic,
             out,

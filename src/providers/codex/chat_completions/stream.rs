@@ -155,9 +155,12 @@ impl StreamState {
                 &self.ctx.req_id,
                 chunk.len() as u64,
                 event_count,
-                Some(self.completion.usage.prompt_tokens),
-                Some(self.completion.usage.completion_tokens),
+                None,
+                None,
             );
+            if self.completion.usage.is_reported() {
+                monitor.usage_observed(&self.ctx.req_id, self.completion.usage.token_usage());
+            }
         }
     }
 
@@ -222,11 +225,7 @@ impl StreamState {
             terminal["usage"] = self.completion.usage.value();
         }
         if let Some(monitor) = self.ctx.monitor.as_ref() {
-            monitor.usage_updated(
-                &self.ctx.req_id,
-                Some(self.completion.usage.prompt_tokens),
-                Some(self.completion.usage.completion_tokens),
-            );
+            monitor.usage_final(&self.ctx.req_id, self.completion.usage.token_usage());
         }
         self.output.push_back(sse(terminal));
         self.output

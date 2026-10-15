@@ -65,8 +65,21 @@ impl AnthropicProvider {
             http::header::ACCEPT_ENCODING,
             http::HeaderValue::from_static("identity"),
         );
+        // Fast mode is a request parameter; the response confirms it in usage.
+        let request_tier = if request
+            .body
+            .extra
+            .get("speed")
+            .and_then(|speed| speed.as_str())
+            == Some("fast")
+        {
+            crate::pricing::PriceTier::Fast
+        } else {
+            crate::pricing::PriceTier::Standard
+        };
         if let Some(monitor) = &ctx.monitor {
             monitor.model_resolved(&ctx.req_id, model);
+            monitor.pricing_resolved(&ctx.req_id, model, request_tier);
             monitor.upstream_started(&ctx.req_id);
         }
         match self
@@ -77,7 +90,7 @@ impl AnthropicProvider {
             .send()
             .await
         {
-            Ok(upstream) => response::relay(upstream, ctx),
+            Ok(upstream) => response::relay(upstream, ctx, request_tier),
             Err(error) => json_error(
                 StatusCode::BAD_GATEWAY,
                 "api_error",

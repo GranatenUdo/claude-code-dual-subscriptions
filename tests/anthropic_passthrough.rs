@@ -485,3 +485,140 @@ async fn native_schema_validation_and_error_bytes_belong_to_anthropic() {
         error
     );
 }
+
+async fn json_upstream(body: &'static str, encoding: Option<&'static str>) -> Upstream {
+    upstream(Router::new().route(
+        "/v1/messages",
+        post(move || async move {
+            let mut response =
+                ([("content-type", "application/json")], Body::from(body)).into_response();
+            if let Some(encoding) = encoding {
+                response
+                    .headers_mut()
+                    .insert("content-encoding", encoding.parse().unwrap());
+            }
+            response
+        }),
+    ))
+    .await
+}
+
+#[tokio::test]
+async fn stream_cache_usage_is_priced_without_double_counting_writes() {
+    let upstream = upstream(Router::new().route("/v1/messages", post(|| async {
+        let sse = concat!(
+            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-opus-5-5\",\"usage\":{\"input_tokens\":1000,\"cache_read_input_tokens\":50000,\"cache_creation_input_tokens\":3000,\"cache_creation\":{\"ephemeral_5m_input_tokens\":2000,\"ephemeral_1h_input_tokens\":1000},\"output_tokens\":1}}}\n\n",
+            "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":400}}\n\n",
+            "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"cache_creation_input_tokens\":3000,\"output_tokens\":500}}\n\n",
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        );
+        ([("content-type", "text/event-stream")], sse)
+    }))).await;
+    let monitor = MonitorHandle::default();
+    let response = proxy(&upstream, &monitor)
+        .oneshot(request(
+            "/v1/messages",
+            r#"{"model":"opus","stream":true,"messages":[]}"#,
+        ))
+        .await
+        .unwrap();
+    response.into_body().collect().await.unwrap();
+    let snapshot = monitor.snapshot();
+    let request = &snapshot.recent[0];
+    assert_eq!(request.input_tokens, Some(1_000));
+    assert_eq!(request.output_tokens, Some(500));
+    assert_eq!(request.usage_detail.cache_read_tokens, Some(50_000));
+    assert_eq!(request.usage_detail.cache_write_5m_tokens, Some(2_000));
+    assert_eq!(request.usage_detail.cache_write_1h_tokens, Some(1_000));
+    let cost = request.usage_detail.cost.clone().unwrap();
+    assert_eq!(cost.model.as_deref(), Some("claude-opus-5-5"));
+    // 1,000 x $4 + 50,000 x $0.20 + 2,000 x $5 + 1,000 x $8 + 500 x $20 per MTok.
+    assert_eq!(cost.micros, Some(42_000));
+    assert!(!cost.estimated);
+    assert_eq!(snapshot.cost.micros, 42_000);
+}
+
+#[tokio::test]
+async fn fallback_iterations_mark_cost_estimated_at_the_serving_model() {
+    let upstream = json_upstream(
+        r#"{"type":"message","model":"claude-opus-5-5","content":[{"type":"fallback","to":{"model":"claude-opus-4-8"}},{"type":"text","text":"ok"}],"usage":{"input_tokens":100,"output_tokens":10,"iterations":[{"type":"message"},{"type":"fallback_message"}]}}"#,
+        None,
+    )
+    .await;
+    let monitor = MonitorHandle::default();
+    proxy(&upstream, &monitor)
+        .oneshot(request(
+            "/v1/messages",
+            r#"{"model":"claude-opus-5-5","messages":[]}"#,
+        ))
+        .await
+        .unwrap()
+        .into_body()
+        .collect()
+        .await
+        .unwrap();
+    let cost = monitor.snapshot().recent[0]
+        .usage_detail
+        .cost
+        .clone()
+        .unwrap();
+    assert_eq!(cost.model.as_deref(), Some("claude-opus-4-8"));
+    assert!(cost.estimated);
+    assert_eq!(cost.micros, Some(100 * 5 + 10 * 25));
+}
+
+#[tokio::test]
+async fn request_fast_mode_prices_at_fast_rates() {
+    let upstream = json_upstream(
+        r#"{"type":"message","model":"claude-opus-5-5","content":[],"usage":{"input_tokens":1000,"output_tokens":100}}"#,
+        None,
+    )
+    .await;
+    let monitor = MonitorHandle::default();
+    proxy(&upstream, &monitor)
+        .oneshot(request(
+            "/v1/messages",
+            r#"{"model":"claude-opus-5-5","speed":"fast","messages":[]}"#,
+        ))
+        .await
+        .unwrap()
+        .into_body()
+        .collect()
+        .await
+        .unwrap();
+    let cost = monitor.snapshot().recent[0]
+        .usage_detail
+        .cost
+        .clone()
+        .unwrap();
+    assert_eq!(cost.tier, claude_code_proxy::pricing::PriceTier::Fast);
+    assert_eq!(cost.micros, Some(1_000 * 8 + 100 * 40));
+}
+
+#[tokio::test]
+async fn unobservable_success_body_is_counted_unmetered() {
+    let upstream = json_upstream("compressed", Some("gzip")).await;
+    let monitor = MonitorHandle::default();
+    proxy(&upstream, &monitor)
+        .oneshot(request(
+            "/v1/messages",
+            r#"{"model":"claude-opus-5-5","messages":[]}"#,
+        ))
+        .await
+        .unwrap()
+        .into_body()
+        .collect()
+        .await
+        .unwrap();
+    let snapshot = monitor.snapshot();
+    assert_eq!(
+        snapshot.recent[0]
+            .usage_detail
+            .cost
+            .as_ref()
+            .map(|cost| cost.status),
+        Some(claude_code_proxy::monitor::CostStatus::Unmetered)
+    );
+    assert_eq!(snapshot.cost.unmetered, 1);
+    assert_eq!(snapshot.cost.micros, 0);
+}

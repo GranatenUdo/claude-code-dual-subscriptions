@@ -23,7 +23,9 @@ It does not verify provider credentials or upstream availability.
 
 Read-only dashboard snapshot, available when monitor collection is enabled. The CLI enables collection in both plain and interactive `serve` modes. Only actual loopback peers are allowed; forwarded IP headers do not grant access. Other peers receive HTTP 403, and disabled collection returns HTTP 404. Responses use `Cache-Control: no-store`.
 
-The JSON envelope contains `version: 1` and a `snapshot` with the proxy start time, sessions, active requests and recent requests. It includes the monitor's display metadata, timing, token usage and computed throughput. It does not include credentials or request/response bodies. Process-local monotonic clocks remain in the service; snapshots contain elapsed durations instead.
+The JSON envelope contains `version: 1` and a `snapshot` with the proxy start time, sessions, active requests and recent requests. It includes the monitor's display metadata, timing, token usage and computed throughput.
+
+Requests carry `input_tokens` (uncached input), `output_tokens`, `cache_read_tokens`, `cache_write_5m_tokens`, `cache_write_1h_tokens` and a `cost` object (`status`, `micros`, `estimated`, `model`, `tier`). Sessions and the snapshot carry `cost` totals (`micros`, `unpriced`, `unmetered`, `estimated`, `by_model`), and the snapshot names `prices_as_of`. Amounts are integer micro-USD at API list prices. All of these fields are optional, so viewers and proxies of different versions keep attaching. On native `/v1/responses` and Chat Completions requests, `input_tokens` now excludes cached tokens, matching Anthropic semantics. It does not include credentials or request/response bodies. Process-local monotonic clocks remain in the service; snapshots contain elapsed durations instead.
 
 The `monitor` CLI polls this endpoint. There is no corresponding mutation or shutdown endpoint. Attaching or disconnecting a viewer does not change proxy lifetime or request accounting.
 

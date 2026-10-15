@@ -11,6 +11,8 @@ use http::{HeaderMap, HeaderName, StatusCode};
 use serde_json::{Map, Value, json};
 
 use crate::anthropic::sse::parse_sse_events;
+use crate::monitor::TokenUsage;
+use crate::pricing::PriceTier;
 use crate::provider::RequestContext;
 use crate::traffic::{
     MAX_SSE_CAPTURE_BYTES, MAX_STREAM_CAPTURE_EVENT_BYTES, MAX_STREAM_CAPTURE_EVENTS,
@@ -48,6 +50,13 @@ impl CodexNativeBackend {
         };
         if let Some(monitor) = ctx.monitor.as_ref() {
             monitor.model_resolved(&ctx.req_id, &resolved.model);
+            // The shaped body carries the effective tier, including a value
+            // the client set explicitly.
+            monitor.pricing_resolved(
+                &ctx.req_id,
+                &resolved.model,
+                PriceTier::from_wire(body.get("service_tier").and_then(Value::as_str)),
+            );
             monitor.upstream_started(&ctx.req_id);
         }
 
@@ -324,6 +333,7 @@ struct NativeResponseObserver {
     captured_event_bytes: usize,
     captured_events_truncated: u64,
     input_tokens: Option<u64>,
+    cached_tokens: Option<u64>,
     output_tokens: Option<u64>,
     outcome: NativeResponseOutcome,
     finished: bool,
@@ -345,6 +355,7 @@ impl NativeResponseObserver {
             captured_event_bytes: 0,
             captured_events_truncated: 0,
             input_tokens: None,
+            cached_tokens: None,
             output_tokens: None,
             outcome,
             finished: false,
@@ -367,14 +378,18 @@ impl NativeResponseObserver {
             0
         };
         if let Some(monitor) = self.ctx.monitor.as_ref() {
-            monitor.stream_progress(
-                &self.ctx.req_id,
-                chunk.len() as u64,
-                events,
-                self.input_tokens,
-                self.output_tokens,
-            );
+            monitor.stream_progress(&self.ctx.req_id, chunk.len() as u64, events, None, None);
+            if let Some(usage) = self.token_usage() {
+                monitor.usage_observed(&self.ctx.req_id, usage);
+            }
         }
+    }
+
+    /// Reported usage in Anthropic semantics: input excludes cached tokens.
+    fn token_usage(&self) -> Option<TokenUsage> {
+        (self.input_tokens.is_some() || self.output_tokens.is_some()).then(|| {
+            TokenUsage::from_openai(self.input_tokens, self.cached_tokens, self.output_tokens)
+        })
     }
 
     fn capture_raw(&mut self, chunk: &[u8]) {
@@ -503,6 +518,10 @@ impl NativeResponseObserver {
                 .get("output_tokens")
                 .and_then(Value::as_u64)
                 .or(self.output_tokens);
+            self.cached_tokens = usage
+                .pointer("/input_tokens_details/cached_tokens")
+                .and_then(Value::as_u64)
+                .or(self.cached_tokens);
         }
     }
 
@@ -517,9 +536,11 @@ impl NativeResponseObserver {
             self.update_usage(&value);
             self.update_outcome(&value);
             self.capture_event(value);
-            if let Some(monitor) = self.ctx.monitor.as_ref() {
-                monitor.usage_updated(&self.ctx.req_id, self.input_tokens, self.output_tokens);
-            }
+        }
+        if let Some(monitor) = self.ctx.monitor.as_ref()
+            && let Some(usage) = self.token_usage()
+        {
+            monitor.usage_final(&self.ctx.req_id, usage);
         }
         self.write_capture(outcome);
     }
@@ -606,6 +627,58 @@ mod tests {
             traffic: None,
             monitor: None,
         }
+    }
+
+    #[test]
+    fn native_usage_is_normalized_to_uncached_input_and_priced() {
+        let monitor = crate::monitor::MonitorHandle::new(10);
+        monitor.request_started(
+            "native-test",
+            None,
+            None,
+            crate::monitor::EndpointKind::Responses,
+        );
+        monitor.provider_selected("native-test", "codex", "gpt-6-luna", None);
+        monitor.pricing_resolved("native-test", "gpt-6-luna", PriceTier::Flex);
+        let ctx = RequestContext {
+            monitor: Some(monitor.clone()),
+            ..observer_context()
+        };
+        let mut observer = NativeResponseObserver::new(ctx, true, NativeResponseOutcome::default());
+        observer.observe(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":100000,\"input_tokens_details\":{\"cached_tokens\":60000},\"output_tokens\":2000}}}\n\n",
+        );
+        observer.finish("complete");
+        let state = monitor.snapshot();
+        let request = &state.active[0];
+        assert_eq!(request.input_tokens, Some(40_000));
+        assert_eq!(request.usage_detail.cache_read_tokens, Some(60_000));
+        assert_eq!(request.output_tokens, Some(2_000));
+        // gpt-6-luna flex: 40K x $0.05 + 60K x $0.005 + 2K x $0.25 per MTok.
+        assert_eq!(
+            request
+                .usage_detail
+                .cost
+                .as_ref()
+                .and_then(|cost| cost.micros),
+            Some(2_000 + 300 + 500)
+        );
+    }
+
+    #[test]
+    fn shaped_native_tier_selects_the_price_tier() {
+        let mut body = json!({"model":"gpt-6.1-sol-ultrafast","input":"hi"});
+        shape_native_request(&mut body).unwrap();
+        assert_eq!(
+            PriceTier::from_wire(body.get("service_tier").and_then(Value::as_str)),
+            PriceTier::Ultrafast
+        );
+        let mut explicit = json!({"model":"gpt-6.1-sol","service_tier":"flex","input":"hi"});
+        shape_native_request(&mut explicit).unwrap();
+        assert_eq!(
+            PriceTier::from_wire(explicit.get("service_tier").and_then(Value::as_str)),
+            PriceTier::Flex
+        );
     }
 
     #[test]

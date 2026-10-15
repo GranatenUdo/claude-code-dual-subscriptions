@@ -1,9 +1,11 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime},
 };
+
+use crate::pricing::{self, PriceFamily, PriceTier, PricedUsage};
 
 mod mock;
 pub mod remote;
@@ -112,11 +114,38 @@ pub enum MonitorEvent {
         chunks: u64,
         input_tokens: Option<u64>,
         output_tokens: Option<u64>,
+        /// The input count is a local estimate, not provider-reported usage.
+        input_estimated: bool,
     },
     UsageUpdated {
         request_id: String,
         input_tokens: Option<u64>,
         output_tokens: Option<u64>,
+    },
+    /// Progress usage with cache detail; counts only ever grow.
+    UsageObserved {
+        request_id: String,
+        usage: TokenUsage,
+    },
+    /// Provider-reported final usage; replaces every field it carries,
+    /// including earlier local estimates.
+    UsageFinal {
+        request_id: String,
+        usage: TokenUsage,
+    },
+    /// The upstream model and service tier the request is billed at.
+    PricingResolved {
+        request_id: String,
+        model: String,
+        tier: PriceTier,
+    },
+    /// Usage was counted locally, so the cost is only an estimate.
+    CostEstimated {
+        request_id: String,
+    },
+    /// The response could not be observed, so no usage is known.
+    UsageUnmetered {
+        request_id: String,
     },
     RequestCompleted {
         request_id: String,
@@ -133,6 +162,59 @@ pub enum MonitorEvent {
         request_id: String,
         error: String,
     },
+}
+
+impl MonitorEvent {
+    fn request_id(&self) -> &str {
+        match self {
+            Self::RequestStarted { request_id, .. }
+            | Self::ProjectResolved { request_id, .. }
+            | Self::SessionSequenceResolved { request_id, .. }
+            | Self::ProviderSelected { request_id, .. }
+            | Self::ModelResolved { request_id, .. }
+            | Self::CompactionStarted { request_id }
+            | Self::UpstreamStarted { request_id }
+            | Self::GenerationStarted { request_id }
+            | Self::TrafficCapturePath { request_id, .. }
+            | Self::StreamProgress { request_id, .. }
+            | Self::UsageUpdated { request_id, .. }
+            | Self::UsageObserved { request_id, .. }
+            | Self::UsageFinal { request_id, .. }
+            | Self::PricingResolved { request_id, .. }
+            | Self::CostEstimated { request_id }
+            | Self::UsageUnmetered { request_id }
+            | Self::RequestCompleted { request_id, .. }
+            | Self::RequestFailed { request_id, .. }
+            | Self::RequestAbandoned { request_id, .. } => request_id,
+        }
+    }
+}
+
+/// Mutable usage fields of one request, whether still active or completed.
+struct RequestUsageMut<'a> {
+    session_id: Option<String>,
+    input_tokens: &'a mut Option<u64>,
+    output_tokens: &'a mut Option<u64>,
+    detail: &'a mut UsageDetail,
+    generation_started_instant: Option<Instant>,
+    generation_finished_at: &'a mut Option<SystemTime>,
+    generation_duration: &'a mut Option<Duration>,
+    /// Set for completed requests, whose output history is recorded per delta.
+    finished_at: Option<SystemTime>,
+}
+
+impl RequestUsageMut<'_> {
+    fn mark_generation_output(&mut self) {
+        if let Some(started) = self.generation_started_instant {
+            *self.generation_finished_at = Some(SystemTime::now());
+            *self.generation_duration = Some(started.elapsed());
+        }
+    }
+
+    fn history_timestamp(&self) -> Option<SystemTime> {
+        self.finished_at
+            .map(|finished| self.generation_finished_at.unwrap_or(finished))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -157,6 +239,7 @@ pub struct ActiveRequest {
     pub stream_chunks: u64,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
+    pub usage_detail: UsageDetail,
     pub error: Option<String>,
     pub traffic_capture_path: Option<PathBuf>,
 }
@@ -201,6 +284,7 @@ pub struct CompletedRequest {
     pub stream_chunks: u64,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
+    pub usage_detail: UsageDetail,
     pub error: Option<String>,
     pub traffic_capture_path: Option<PathBuf>,
 }
@@ -240,6 +324,239 @@ impl Throughput {
     }
 }
 
+/// Token counts in Anthropic semantics: `input` excludes cache reads and
+/// writes. `None` means the field was not reported.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TokenUsage {
+    pub input: Option<u64>,
+    pub cache_read: Option<u64>,
+    pub cache_write_5m: Option<u64>,
+    pub cache_write_1h: Option<u64>,
+    pub output: Option<u64>,
+}
+
+impl TokenUsage {
+    /// Converts OpenAI usage, whose input total includes cached tokens.
+    pub fn from_openai(input_total: Option<u64>, cached: Option<u64>, output: Option<u64>) -> Self {
+        Self {
+            input: input_total.map(|total| total.saturating_sub(cached.unwrap_or(0))),
+            cache_read: input_total.map(|_| cached.unwrap_or(0)).or(cached),
+            cache_write_5m: None,
+            cache_write_1h: None,
+            output,
+        }
+    }
+
+    fn is_reported(&self) -> bool {
+        self.input.is_some()
+            || self.cache_read.is_some()
+            || self.cache_write_5m.is_some()
+            || self.cache_write_1h.is_some()
+            || self.output.is_some()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CostStatus {
+    /// Priceable request without usage yet.
+    Pending,
+    Priced,
+    /// Usage is known but no published price applies.
+    Unpriced,
+    /// The response could not be observed.
+    Unmetered,
+}
+
+/// API-equivalent cost of one request at list prices.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RequestCost {
+    pub status: CostStatus,
+    #[serde(default)]
+    pub micros: Option<u64>,
+    #[serde(default)]
+    pub estimated: bool,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub tier: PriceTier,
+}
+
+/// Summed API-equivalent cost in micro-USD.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CostTotals {
+    pub micros: u64,
+    #[serde(default)]
+    pub unpriced: u32,
+    #[serde(default)]
+    pub unmetered: u32,
+    #[serde(default)]
+    pub estimated: u32,
+    #[serde(default)]
+    pub by_model: BTreeMap<String, u64>,
+}
+
+impl CostTotals {
+    fn apply(&mut self, old: &CostContribution, new: &CostContribution) {
+        self.micros = self
+            .micros
+            .saturating_sub(old.micros)
+            .saturating_add(new.micros);
+        self.unpriced = self
+            .unpriced
+            .saturating_sub(u32::from(old.unpriced))
+            .saturating_add(u32::from(new.unpriced));
+        self.unmetered = self
+            .unmetered
+            .saturating_sub(u32::from(old.unmetered))
+            .saturating_add(u32::from(new.unmetered));
+        self.estimated = self
+            .estimated
+            .saturating_sub(u32::from(old.estimated))
+            .saturating_add(u32::from(new.estimated));
+        if let Some(model) = &old.model
+            && let Some(micros) = self.by_model.get_mut(model)
+        {
+            *micros = micros.saturating_sub(old.micros);
+            if *micros == 0 {
+                self.by_model.remove(model);
+            }
+        }
+        if let Some(model) = &new.model
+            && new.micros > 0
+        {
+            let micros = self.by_model.entry(model.clone()).or_default();
+            *micros = micros.saturating_add(new.micros);
+        }
+    }
+}
+
+/// What one request currently adds to session and store-wide cost totals.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct CostContribution {
+    micros: u64,
+    model: Option<String>,
+    unpriced: bool,
+    unmetered: bool,
+    estimated: bool,
+}
+
+impl CostContribution {
+    fn of(cost: Option<&RequestCost>) -> Self {
+        let Some(cost) = cost else {
+            return Self::default();
+        };
+        Self {
+            micros: cost.micros.unwrap_or(0),
+            model: cost.model.clone().filter(|_| cost.micros.is_some()),
+            unpriced: cost.status == CostStatus::Unpriced,
+            unmetered: cost.status == CostStatus::Unmetered,
+            estimated: cost.estimated && cost.status == CostStatus::Priced,
+        }
+    }
+}
+
+/// Cache token detail and pricing state shared by active and completed
+/// requests.
+#[derive(Debug, Clone, Default)]
+pub struct UsageDetail {
+    pub cache_read_tokens: Option<u64>,
+    pub cache_write_5m_tokens: Option<u64>,
+    pub cache_write_1h_tokens: Option<u64>,
+    /// `None` for requests outside the hardcoded price lists.
+    pub cost: Option<RequestCost>,
+    input_estimated: bool,
+    cost_estimated: bool,
+    unmetered: bool,
+    selected_model: Option<String>,
+    resolved_model: Option<String>,
+    priced_model: Option<String>,
+    price_tier: Option<PriceTier>,
+    accounted: CostContribution,
+}
+
+impl UsageDetail {
+    fn price(
+        &mut self,
+        provider: Option<&str>,
+        endpoint: EndpointKind,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+    ) -> Option<(CostContribution, CostContribution)> {
+        self.cost = self.compute_cost(provider, endpoint, input_tokens, output_tokens);
+        let next = CostContribution::of(self.cost.as_ref());
+        (next != self.accounted)
+            .then(|| (std::mem::replace(&mut self.accounted, next.clone()), next))
+    }
+
+    fn compute_cost(
+        &self,
+        provider: Option<&str>,
+        endpoint: EndpointKind,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+    ) -> Option<RequestCost> {
+        if !matches!(
+            endpoint,
+            EndpointKind::Messages | EndpointKind::Responses | EndpointKind::ChatCompletions
+        ) {
+            return None;
+        }
+        let family = PriceFamily::for_provider(provider?)?;
+        let requested = self
+            .priced_model
+            .as_deref()
+            .or(self.resolved_model.as_deref())
+            .or(self.selected_model.as_deref());
+        let model = requested.map(|model| pricing::normalize_model(family, model));
+        let tier = self
+            .price_tier
+            .or_else(|| {
+                self.selected_model
+                    .as_deref()
+                    .and_then(pricing::tier_from_model_suffix)
+            })
+            .unwrap_or_default();
+        let reported = input_tokens.is_some()
+            || output_tokens.is_some()
+            || self.cache_read_tokens.is_some()
+            || self.cache_write_5m_tokens.is_some()
+            || self.cache_write_1h_tokens.is_some();
+        let estimated = self.input_estimated || self.cost_estimated;
+        let cost = |status, micros| RequestCost {
+            status,
+            micros,
+            estimated,
+            model: model.clone(),
+            tier,
+        };
+        if !reported {
+            let status = if self.unmetered {
+                CostStatus::Unmetered
+            } else {
+                CostStatus::Pending
+            };
+            return Some(cost(status, None));
+        }
+        let usage = PricedUsage {
+            input: input_tokens.unwrap_or(0),
+            cache_read: self.cache_read_tokens.unwrap_or(0),
+            cache_write_5m: self.cache_write_5m_tokens.unwrap_or(0),
+            cache_write_1h: self.cache_write_1h_tokens.unwrap_or(0),
+            output: output_tokens.unwrap_or(0),
+        };
+        Some(
+            match model
+                .as_deref()
+                .and_then(|model| pricing::estimate_micros(family, model, tier, &usage))
+            {
+                Some(micros) => cost(CostStatus::Priced, Some(micros)),
+                None => cost(CostStatus::Unpriced, None),
+            },
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MonitorState {
     pub started_at: SystemTime,
@@ -247,6 +564,7 @@ pub struct MonitorState {
     pub sessions: Vec<SessionSummary>,
     pub active: Vec<ActiveRequest>,
     pub recent: Vec<CompletedRequest>,
+    pub cost: CostTotals,
 }
 
 #[derive(Debug, Clone)]
@@ -266,6 +584,7 @@ pub struct SessionSummary {
     rate_output_tokens: u64,
     pub generation_duration: Duration,
     pub last_status: String,
+    pub cost: CostTotals,
 }
 
 impl SessionSummary {
@@ -295,12 +614,14 @@ struct MonitorStore {
     session_usage: HashMap<Option<String>, SessionUsage>,
     session_output_buckets: HashMap<Option<String>, Vec<(u64, u64)>>,
     recent_limit: usize,
+    cost_totals: CostTotals,
 }
 
 #[derive(Debug)]
 struct SessionUsage {
     input_tokens: u64,
     output_tokens: u64,
+    cost: CostTotals,
     last_seen: SystemTime,
 }
 
@@ -309,6 +630,7 @@ impl Default for SessionUsage {
         Self {
             input_tokens: 0,
             output_tokens: 0,
+            cost: CostTotals::default(),
             last_seen: SystemTime::now(),
         }
     }
@@ -337,6 +659,7 @@ impl MonitorHandle {
                 session_usage: HashMap::new(),
                 session_output_buckets: HashMap::new(),
                 recent_limit,
+                cost_totals: CostTotals::default(),
             })),
         }
     }
@@ -356,6 +679,7 @@ impl MonitorHandle {
                 sessions: Vec::new(),
                 active: Vec::new(),
                 recent: Vec::new(),
+                cost: CostTotals::default(),
             },
         }
     }
@@ -450,6 +774,66 @@ impl MonitorHandle {
             chunks,
             input_tokens,
             output_tokens,
+            input_estimated: false,
+        });
+    }
+
+    /// Like [`Self::stream_progress`], but the input count is a local estimate
+    /// that provider-reported final usage later replaces.
+    pub fn stream_progress_estimated_input(
+        &self,
+        request_id: impl Into<String>,
+        bytes: u64,
+        chunks: u64,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+    ) {
+        self.publish(MonitorEvent::StreamProgress {
+            request_id: request_id.into(),
+            bytes,
+            chunks,
+            input_tokens,
+            output_tokens,
+            input_estimated: true,
+        });
+    }
+
+    pub fn usage_observed(&self, request_id: impl Into<String>, usage: TokenUsage) {
+        self.publish(MonitorEvent::UsageObserved {
+            request_id: request_id.into(),
+            usage,
+        });
+    }
+
+    pub fn usage_final(&self, request_id: impl Into<String>, usage: TokenUsage) {
+        self.publish(MonitorEvent::UsageFinal {
+            request_id: request_id.into(),
+            usage,
+        });
+    }
+
+    pub fn pricing_resolved(
+        &self,
+        request_id: impl Into<String>,
+        model: impl Into<String>,
+        tier: PriceTier,
+    ) {
+        self.publish(MonitorEvent::PricingResolved {
+            request_id: request_id.into(),
+            model: model.into(),
+            tier,
+        });
+    }
+
+    pub fn cost_estimated(&self, request_id: impl Into<String>) {
+        self.publish(MonitorEvent::CostEstimated {
+            request_id: request_id.into(),
+        });
+    }
+
+    pub fn usage_unmetered(&self, request_id: impl Into<String>) {
+        self.publish(MonitorEvent::UsageUnmetered {
+            request_id: request_id.into(),
         });
     }
 
@@ -504,6 +888,77 @@ impl MonitorHandle {
 
 impl MonitorStore {
     fn apply(&mut self, event: MonitorEvent) {
+        let request_id = event.request_id().to_string();
+        self.apply_event(event);
+        self.reprice(&request_id);
+        self.prune_session_history_if_due(SystemTime::now());
+    }
+
+    fn request_usage_mut(&mut self, request_id: &str) -> Option<RequestUsageMut<'_>> {
+        if let Some(active) = self.active.get_mut(request_id) {
+            return Some(RequestUsageMut {
+                session_id: active.session_id.clone(),
+                input_tokens: &mut active.input_tokens,
+                output_tokens: &mut active.output_tokens,
+                detail: &mut active.usage_detail,
+                generation_started_instant: active.generation_started_instant,
+                generation_finished_at: &mut active.generation_finished_at,
+                generation_duration: &mut active.generation_duration,
+                finished_at: None,
+            });
+        }
+        self.recent
+            .iter_mut()
+            .find(|request| request.request_id == request_id)
+            .map(|completed| RequestUsageMut {
+                session_id: completed.session_id.clone(),
+                input_tokens: &mut completed.input_tokens,
+                output_tokens: &mut completed.output_tokens,
+                detail: &mut completed.usage_detail,
+                generation_started_instant: completed.generation_started_instant,
+                generation_finished_at: &mut completed.generation_finished_at,
+                generation_duration: &mut completed.generation_duration,
+                finished_at: Some(completed.finished_at),
+            })
+    }
+
+    fn reprice(&mut self, request_id: &str) {
+        let update = if let Some(active) = self.active.get_mut(request_id) {
+            active
+                .usage_detail
+                .price(
+                    active.provider.as_deref(),
+                    active.endpoint,
+                    active.input_tokens,
+                    active.output_tokens,
+                )
+                .map(|change| (active.session_id.clone(), change))
+        } else if let Some(completed) = self
+            .recent
+            .iter_mut()
+            .find(|request| request.request_id == request_id)
+        {
+            completed
+                .usage_detail
+                .price(
+                    completed.provider.as_deref(),
+                    completed.endpoint,
+                    completed.input_tokens,
+                    completed.output_tokens,
+                )
+                .map(|change| (completed.session_id.clone(), change))
+        } else {
+            None
+        };
+        if let Some((session_id, (old, new))) = update {
+            self.cost_totals.apply(&old, &new);
+            let usage = self.session_usage.entry(session_id).or_default();
+            usage.cost.apply(&old, &new);
+            usage.last_seen = SystemTime::now();
+        }
+    }
+
+    fn apply_event(&mut self, event: MonitorEvent) {
         match event {
             MonitorEvent::RequestStarted {
                 request_id,
@@ -534,6 +989,7 @@ impl MonitorStore {
                         stream_chunks: 0,
                         input_tokens: None,
                         output_tokens: None,
+                        usage_detail: UsageDetail::default(),
                         error: None,
                         traffic_capture_path: None,
                     },
@@ -563,6 +1019,7 @@ impl MonitorStore {
             } => {
                 if let Some(active) = self.active.get_mut(&request_id) {
                     active.provider = Some(provider);
+                    active.usage_detail.selected_model = Some(model.clone());
                     active.model = Some(model);
                     active.effort = effort;
                     active.status = RequestStatus::ProviderSelected;
@@ -570,6 +1027,7 @@ impl MonitorStore {
             }
             MonitorEvent::ModelResolved { request_id, model } => {
                 if let Some(active) = self.active.get_mut(&request_id) {
+                    active.usage_detail.resolved_model = Some(model.clone());
                     active.model = Some(match active.model.take() {
                         Some(incoming) if incoming != model => format!("{incoming} → {model}"),
                         Some(incoming) => incoming,
@@ -607,10 +1065,14 @@ impl MonitorStore {
                 chunks,
                 input_tokens,
                 output_tokens,
+                input_estimated,
             } => {
                 let mut usage_update = None;
                 let mut history_update = None;
                 if let Some(active) = self.active.get_mut(&request_id) {
+                    if raises_token_count(&active.input_tokens, input_tokens) {
+                        active.usage_detail.input_estimated = input_estimated;
+                    }
                     active.status = RequestStatus::Streaming;
                     if active.generation_started_instant.is_none() {
                         active.generation_started_at = Some(SystemTime::now());
@@ -639,6 +1101,9 @@ impl MonitorStore {
                     }
                     completed.streamed_bytes = completed.streamed_bytes.saturating_add(bytes);
                     completed.stream_chunks = completed.stream_chunks.saturating_add(chunks);
+                    if raises_token_count(&completed.input_tokens, input_tokens) {
+                        completed.usage_detail.input_estimated = input_estimated;
+                    }
                     let input_delta = update_token_count(&mut completed.input_tokens, input_tokens);
                     let output_delta =
                         update_token_count(&mut completed.output_tokens, output_tokens);
@@ -674,6 +1139,9 @@ impl MonitorStore {
                         active.generation_finished_at = Some(SystemTime::now());
                         active.generation_duration = Some(started.elapsed());
                     }
+                    if raises_token_count(&active.input_tokens, input_tokens) {
+                        active.usage_detail.input_estimated = false;
+                    }
                     let input_delta = update_token_count(&mut active.input_tokens, input_tokens);
                     let output_delta = update_token_count(&mut active.output_tokens, output_tokens);
                     usage_update = Some((active.session_id.clone(), input_delta, output_delta));
@@ -682,6 +1150,9 @@ impl MonitorStore {
                     .iter_mut()
                     .find(|request| request.request_id == request_id)
                 {
+                    if raises_token_count(&completed.input_tokens, input_tokens) {
+                        completed.usage_detail.input_estimated = false;
+                    }
                     if output_tokens.is_some()
                         && let Some(started) = completed.generation_started_instant
                     {
@@ -748,8 +1219,95 @@ impl MonitorStore {
                     Some(error),
                 );
             }
+            MonitorEvent::UsageObserved { request_id, usage } => {
+                self.apply_usage(&request_id, usage, false);
+            }
+            MonitorEvent::UsageFinal { request_id, usage } => {
+                self.apply_usage(&request_id, usage, true);
+            }
+            MonitorEvent::PricingResolved {
+                request_id,
+                model,
+                tier,
+            } => {
+                if let Some(request) = self.request_usage_mut(&request_id) {
+                    request.detail.priced_model = Some(model);
+                    request.detail.price_tier = Some(tier);
+                }
+            }
+            MonitorEvent::CostEstimated { request_id } => {
+                if let Some(request) = self.request_usage_mut(&request_id) {
+                    request.detail.cost_estimated = true;
+                }
+            }
+            MonitorEvent::UsageUnmetered { request_id } => {
+                if let Some(request) = self.request_usage_mut(&request_id) {
+                    request.detail.unmetered = true;
+                }
+            }
         }
-        self.prune_session_history_if_due(SystemTime::now());
+    }
+
+    /// Progress observations only raise counts; final usage replaces every
+    /// field it carries and corrects session totals by the signed difference.
+    fn apply_usage(&mut self, request_id: &str, usage: TokenUsage, is_final: bool) {
+        if !usage.is_reported() {
+            return;
+        }
+        let Some(mut request) = self.request_usage_mut(request_id) else {
+            return;
+        };
+        if usage.output.is_some() {
+            request.mark_generation_output();
+        }
+        let (input_delta, output_delta) = if is_final {
+            let input = replace_token_count(request.input_tokens, usage.input);
+            if usage.input.is_some() {
+                request.detail.input_estimated = false;
+            }
+            let output = replace_token_count(request.output_tokens, usage.output);
+            for (field, value) in [
+                (&mut request.detail.cache_read_tokens, usage.cache_read),
+                (
+                    &mut request.detail.cache_write_5m_tokens,
+                    usage.cache_write_5m,
+                ),
+                (
+                    &mut request.detail.cache_write_1h_tokens,
+                    usage.cache_write_1h,
+                ),
+            ] {
+                if value.is_some() {
+                    *field = value;
+                }
+            }
+            (input, output)
+        } else {
+            if raises_token_count(request.input_tokens, usage.input) {
+                request.detail.input_estimated = false;
+            }
+            let input = update_token_count(request.input_tokens, usage.input) as i64;
+            let output = update_token_count(request.output_tokens, usage.output) as i64;
+            update_token_count(&mut request.detail.cache_read_tokens, usage.cache_read);
+            update_token_count(
+                &mut request.detail.cache_write_5m_tokens,
+                usage.cache_write_5m,
+            );
+            update_token_count(
+                &mut request.detail.cache_write_1h_tokens,
+                usage.cache_write_1h,
+            );
+            (input, output)
+        };
+        let session_id = request.session_id.clone();
+        let history = request
+            .history_timestamp()
+            .filter(|_| output_delta > 0)
+            .map(|timestamp| (timestamp, output_delta as u64));
+        self.record_session_usage_signed(session_id.clone(), input_delta, output_delta);
+        if let Some((timestamp, tokens)) = history {
+            self.record_session_output(session_id, timestamp, tokens);
+        }
     }
 
     fn finish_active(
@@ -806,6 +1364,7 @@ impl MonitorStore {
                 stream_chunks: 0,
                 input_tokens: None,
                 output_tokens: None,
+                usage_detail: UsageDetail::default(),
                 error: None,
                 traffic_capture_path: None,
             });
@@ -841,6 +1400,7 @@ impl MonitorStore {
             stream_chunks: active.stream_chunks,
             input_tokens: active.input_tokens,
             output_tokens: active.output_tokens,
+            usage_detail: active.usage_detail,
             error: error.or(active.error),
             traffic_capture_path: active.traffic_capture_path,
         };
@@ -868,6 +1428,18 @@ impl MonitorStore {
         let usage = self.session_usage.entry(session_id).or_default();
         usage.input_tokens = usage.input_tokens.saturating_add(input_tokens);
         usage.output_tokens = usage.output_tokens.saturating_add(output_tokens);
+        usage.last_seen = SystemTime::now();
+    }
+
+    fn record_session_usage_signed(
+        &mut self,
+        session_id: Option<String>,
+        input_delta: i64,
+        output_delta: i64,
+    ) {
+        let usage = self.session_usage.entry(session_id).or_default();
+        usage.input_tokens = usage.input_tokens.saturating_add_signed(input_delta);
+        usage.output_tokens = usage.output_tokens.saturating_add_signed(output_delta);
         usage.last_seen = SystemTime::now();
     }
 
@@ -932,6 +1504,7 @@ impl MonitorStore {
             sessions,
             active,
             recent: self.recent.iter().cloned().collect(),
+            cost: self.cost_totals.clone(),
         }
     }
 }
@@ -963,6 +1536,7 @@ fn session_summaries(
                 rate_output_tokens: 0,
                 generation_duration: Duration::ZERO,
                 last_status: "-".to_string(),
+                cost: CostTotals::default(),
             });
         entry.request_count += 1;
         if request.status == RequestStatus::Failed {
@@ -1007,6 +1581,7 @@ fn session_summaries(
                 rate_output_tokens: 0,
                 generation_duration: Duration::ZERO,
                 last_status: "-".to_string(),
+                cost: CostTotals::default(),
             });
         entry.active_count += 1;
         entry.request_count += 1;
@@ -1035,6 +1610,7 @@ fn session_summaries(
         if let Some(usage) = session_usage.get(session_id) {
             session.input_tokens = usage.input_tokens;
             session.output_tokens = usage.output_tokens;
+            session.cost = usage.cost.clone();
         }
         if let Some(buckets) = session_output_buckets.get(session_id) {
             session.output_token_samples = buckets
@@ -1075,6 +1651,21 @@ fn update_token_count(current: &mut Option<u64>, incoming: Option<u64>) -> u64 {
         *current = Some(incoming);
     }
     incoming.saturating_sub(previous)
+}
+
+fn raises_token_count(current: &Option<u64>, incoming: Option<u64>) -> bool {
+    incoming.is_some_and(|incoming| current.is_none_or(|current| incoming > current))
+}
+
+/// Sets a provider-reported count and returns the signed change.
+fn replace_token_count(current: &mut Option<u64>, incoming: Option<u64>) -> i64 {
+    let Some(incoming) = incoming else {
+        return 0;
+    };
+    let previous = current.replace(incoming).unwrap_or(0);
+    i64::try_from(incoming)
+        .unwrap_or(i64::MAX)
+        .saturating_sub(i64::try_from(previous).unwrap_or(i64::MAX))
 }
 
 fn max_system_time(left: SystemTime, right: SystemTime) -> SystemTime {
@@ -1398,6 +1989,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input
             stream_chunks: 0,
             input_tokens: None,
             output_tokens: Some(output_tokens),
+            usage_detail: UsageDetail::default(),
             error: None,
             traffic_capture_path: None,
         }
@@ -1860,5 +2452,216 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input
 
         assert_eq!(first, vec!["session-a", "session-b"]);
         assert_eq!(second, first);
+    }
+
+    fn priced_request(
+        monitor: &MonitorHandle,
+        request_id: &str,
+        session_id: &str,
+        provider: &str,
+        model: &str,
+    ) {
+        monitor.request_started(
+            request_id,
+            Some(session_id.to_string()),
+            None,
+            EndpointKind::Messages,
+        );
+        monitor.provider_selected(request_id, provider, model, None);
+        monitor.model_resolved(request_id, model);
+    }
+
+    fn final_usage(input: u64, output: u64) -> TokenUsage {
+        TokenUsage {
+            input: Some(input),
+            output: Some(output),
+            ..TokenUsage::default()
+        }
+    }
+
+    const MTOK: u64 = 1_000_000;
+
+    #[test]
+    fn session_and_store_cost_survive_recent_eviction() {
+        let monitor = MonitorHandle::new(2);
+        for index in 0..5 {
+            let id = format!("r{index}");
+            priced_request(&monitor, &id, "s", "codex", "gpt-6-astra");
+            monitor.usage_final(&id, final_usage(100_000, 0));
+            monitor.request_completed(&id, 200, None, None);
+        }
+        let state = monitor.snapshot();
+        assert_eq!(state.recent.len(), 2);
+        // Five requests of 100K Astra input at $10 per MTok.
+        assert_eq!(state.sessions[0].cost.micros, 5 * MTOK);
+        assert_eq!(state.cost.micros, 5 * MTOK);
+        assert_eq!(state.cost.by_model.get("gpt-6-astra"), Some(&(5 * MTOK)));
+    }
+
+    #[test]
+    fn count_tokens_and_unpriced_providers_add_no_cost() {
+        let monitor = MonitorHandle::default();
+        monitor.request_started("count", Some("s".into()), None, EndpointKind::CountTokens);
+        monitor.provider_selected("count", "anthropic", "claude-opus-5-5", None);
+        monitor.request_completed("count", 200, Some(MTOK), None);
+        priced_request(&monitor, "kimi", "s", "kimi", "kimi-k2.6");
+        monitor.usage_updated("kimi", Some(MTOK), Some(MTOK));
+        monitor.request_completed("kimi", 200, None, None);
+        let state = monitor.snapshot();
+        assert!(
+            state
+                .recent
+                .iter()
+                .all(|request| request.usage_detail.cost.is_none())
+        );
+        assert_eq!(state.cost, CostTotals::default());
+    }
+
+    #[test]
+    fn mixed_claude_and_codex_session_breaks_cost_down_by_model() {
+        let monitor = MonitorHandle::default();
+        priced_request(&monitor, "claude", "dual", "anthropic", "claude-opus-5-5");
+        monitor.usage_final(
+            "claude",
+            TokenUsage {
+                input: Some(MTOK),
+                cache_read: Some(MTOK),
+                cache_write_5m: Some(MTOK),
+                cache_write_1h: Some(MTOK),
+                output: Some(MTOK),
+            },
+        );
+        monitor.request_completed("claude", 200, None, None);
+        priced_request(&monitor, "codex", "dual", "codex", "gpt-6-astra");
+        monitor.usage_final(
+            "codex",
+            TokenUsage::from_openai(Some(200_000), Some(100_000), Some(0)),
+        );
+        monitor.request_completed("codex", 200, None, None);
+        let state = monitor.snapshot();
+        // Opus 5.5: $4 + $0.20 + $5 + $8 + $20; Astra: $1 + $0.10 cached.
+        let claude = 37_200_000;
+        let astra = 1_100_000;
+        let session = &state.sessions[0].cost;
+        assert_eq!(session.by_model.get("claude-opus-5-5"), Some(&claude));
+        assert_eq!(session.by_model.get("gpt-6-astra"), Some(&astra));
+        assert_eq!(session.micros, claude + astra);
+        assert_eq!(state.cost.micros, claude + astra);
+    }
+
+    #[test]
+    fn pricing_key_change_moves_cost_and_clears_unpriced() {
+        let monitor = MonitorHandle::default();
+        priced_request(&monitor, "r", "s", "codex", "gpt-5.3-codex-spark");
+        monitor.usage_final("r", final_usage(100_000, 0));
+        let state = monitor.snapshot();
+        assert_eq!(state.cost.unpriced, 1);
+        assert_eq!(state.cost.micros, 0);
+        assert_eq!(
+            state.active[0]
+                .usage_detail
+                .cost
+                .as_ref()
+                .map(|cost| cost.status),
+            Some(CostStatus::Unpriced)
+        );
+        monitor.pricing_resolved("r", "gpt-6-sol", PriceTier::Standard);
+        let state = monitor.snapshot();
+        assert_eq!(state.cost.unpriced, 0);
+        assert_eq!(state.cost.by_model.get("gpt-6-sol"), Some(&200_000));
+        monitor.pricing_resolved("r", "gpt-6-astra", PriceTier::Fast);
+        let state = monitor.snapshot();
+        assert_eq!(state.cost.by_model.get("gpt-6-sol"), None);
+        assert_eq!(state.cost.by_model.get("gpt-6-astra"), Some(&(2 * MTOK)));
+        assert_eq!(state.sessions[0].cost.micros, 2 * MTOK);
+    }
+
+    #[test]
+    fn final_usage_after_completion_updates_recent_entry_and_totals() {
+        let monitor = MonitorHandle::default();
+        priced_request(&monitor, "r", "s", "anthropic", "claude-sonnet-5-5");
+        monitor.request_completed("r", 200, None, None);
+        let state = monitor.snapshot();
+        assert_eq!(
+            state.recent[0]
+                .usage_detail
+                .cost
+                .as_ref()
+                .map(|cost| cost.status),
+            Some(CostStatus::Pending)
+        );
+        monitor.usage_final("r", final_usage(MTOK, MTOK));
+        let state = monitor.snapshot();
+        assert_eq!(state.recent[0].input_tokens, Some(MTOK));
+        assert_eq!(
+            state.recent[0]
+                .usage_detail
+                .cost
+                .as_ref()
+                .and_then(|cost| cost.micros),
+            Some(12 * MTOK)
+        );
+        assert_eq!(state.sessions[0].input_tokens, MTOK);
+        assert_eq!(state.cost.micros, 12 * MTOK);
+    }
+
+    #[test]
+    fn final_usage_corrects_estimates_while_observations_only_raise() {
+        let monitor = MonitorHandle::default();
+        priced_request(&monitor, "r", "s", "codex", "gpt-6-luna");
+        monitor.stream_progress_estimated_input("r", 10, 1, Some(5_000), Some(0));
+        monitor.usage_observed("r", final_usage(4_000, 10));
+        let state = monitor.snapshot();
+        assert_eq!(state.active[0].input_tokens, Some(5_000));
+        assert!(
+            state.active[0]
+                .usage_detail
+                .cost
+                .as_ref()
+                .unwrap()
+                .estimated
+        );
+        monitor.usage_final("r", final_usage(4_000, 10));
+        let state = monitor.snapshot();
+        assert_eq!(state.active[0].input_tokens, Some(4_000));
+        assert!(
+            !state.active[0]
+                .usage_detail
+                .cost
+                .as_ref()
+                .unwrap()
+                .estimated
+        );
+        assert_eq!(state.sessions[0].input_tokens, 4_000);
+        assert_eq!(state.cost.estimated, 0);
+    }
+
+    #[test]
+    fn unmetered_and_estimated_requests_are_counted_separately() {
+        let monitor = MonitorHandle::default();
+        priced_request(&monitor, "opaque", "s", "anthropic", "claude-opus-5-5");
+        monitor.usage_unmetered("opaque");
+        monitor.request_completed("opaque", 200, None, None);
+        priced_request(&monitor, "search", "s", "codex", "gpt-6-sol");
+        monitor.usage_updated("search", Some(1_000), Some(100));
+        monitor.cost_estimated("search");
+        monitor.request_completed("search", 200, None, None);
+        let state = monitor.snapshot();
+        assert_eq!(state.cost.unmetered, 1);
+        assert_eq!(state.cost.estimated, 1);
+        assert_eq!(state.cost.unpriced, 0);
+        assert_eq!(state.cost.micros, 3_000);
+    }
+
+    #[test]
+    fn fast_tier_from_model_suffix_prices_without_pricing_event() {
+        let monitor = MonitorHandle::default();
+        monitor.request_started("r", None, None, EndpointKind::Messages);
+        monitor.provider_selected("r", "codex", "gpt-6-astra-fast", None);
+        monitor.usage_final("r", final_usage(100_000, 0));
+        let state = monitor.snapshot();
+        let cost = state.active[0].usage_detail.cost.clone().unwrap();
+        assert_eq!(cost.tier, PriceTier::Fast);
+        assert_eq!(cost.micros, Some(2 * MTOK));
     }
 }

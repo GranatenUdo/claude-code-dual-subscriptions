@@ -233,11 +233,12 @@ pub fn run_prepared(prepared: Prepared, router: axum::Router) -> anyhow::Result<
     eprintln!(
         "claude-code-dual: parent Opus 5.5, default worker Astra [1m]; normal project hooks, permissions and MCP retained. Remote policy and upstream capacity remain unverified."
     );
-    runtime.block_on(super::session::supervise(
-        &spec,
-        router,
-        stop_signals(hangup_ignored),
-    ))
+    runtime.block_on(async move {
+        // Handlers are registered before the child starts, so an early
+        // termination signal still runs the session cleanup.
+        let stop = StopSignals::install(hangup_ignored)?;
+        super::session::supervise(&spec, router, stop.wait()).await
+    })
 }
 
 /// Whether SIGHUP was ignored when the launcher started, as under `nohup`;
@@ -255,32 +256,65 @@ fn sighup_ignored() -> bool {
     }
 }
 
-/// Resolves with the conventional exit code of the first termination signal.
-async fn stop_signals(hangup_ignored: bool) -> i32 {
+/// Termination signal handlers, registered when created.
+struct StopSignals {
     #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-        let mut term = signal(SignalKind::terminate()).expect("SIGTERM handler");
-        let mut hangup =
-            (!hangup_ignored).then(|| signal(SignalKind::hangup()).expect("SIGHUP handler"));
-        let hangup = async {
-            match hangup.as_mut() {
-                Some(hangup) => {
-                    hangup.recv().await;
-                }
-                None => std::future::pending::<()>().await,
-            }
-        };
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => 130,
-            _ = term.recv() => 143,
-            _ = hangup => 129,
+    interrupt: tokio::signal::unix::Signal,
+    #[cfg(unix)]
+    terminate: tokio::signal::unix::Signal,
+    #[cfg(unix)]
+    hangup: Option<tokio::signal::unix::Signal>,
+}
+
+impl StopSignals {
+    fn install(hangup_ignored: bool) -> std::io::Result<Self> {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            Ok(Self {
+                interrupt: signal(SignalKind::interrupt())?,
+                terminate: signal(SignalKind::terminate())?,
+                hangup: if hangup_ignored {
+                    None
+                } else {
+                    Some(signal(SignalKind::hangup())?)
+                },
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = hangup_ignored;
+            Ok(Self {})
         }
     }
-    #[cfg(not(unix))]
-    {
-        let _ = hangup_ignored;
-        let _ = tokio::signal::ctrl_c().await;
-        130
+
+    /// Resolves with the conventional exit code of the first signal.
+    async fn wait(self) -> i32 {
+        #[cfg(unix)]
+        {
+            let Self {
+                mut interrupt,
+                mut terminate,
+                mut hangup,
+            } = self;
+            let hangup = async {
+                match hangup.as_mut() {
+                    Some(hangup) => {
+                        hangup.recv().await;
+                    }
+                    None => std::future::pending::<()>().await,
+                }
+            };
+            tokio::select! {
+                _ = interrupt.recv() => 130,
+                _ = terminate.recv() => 143,
+                _ = hangup => 129,
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+            130
+        }
     }
 }

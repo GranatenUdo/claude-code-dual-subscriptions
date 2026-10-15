@@ -242,6 +242,9 @@ static PRICES: &[PriceEntry] = &[
     entry(OA, &["gpt-5.2"], Flex, openai_no_write(0.875, 0.0875, 7.0), FLAT),
 ];
 
+/// Claude models whose fast-mode requests run, and bill, at standard rates.
+const CLAUDE_FAST_AT_STANDARD: &[&str] = &["claude-opus-4-6"];
+
 /// Models the proxy can route but whose price is not published.
 pub const UNPRICED_MODELS: &[&str] = &["gpt-5.3-codex-spark"];
 
@@ -332,11 +335,13 @@ pub fn rates_for(
 ) -> Option<Rates> {
     let model = normalize_model(family, model);
     let entry = find_entry(family, &model, tier).or_else(|| {
-        // Claude bills fast-mode requests on models without a fast-mode price
-        // (for example Opus 4.6) at standard rates.
-        (family == PriceFamily::Claude && tier == PriceTier::Fast)
-            .then(|| find_entry(family, &model, PriceTier::Standard))
-            .flatten()
+        // The pricing page bills fast-mode requests on these models at
+        // standard rates; any other model without a fast price is unpriced.
+        (family == PriceFamily::Claude
+            && tier == PriceTier::Fast
+            && CLAUDE_FAST_AT_STANDARD.contains(&model.as_str()))
+        .then(|| find_entry(family, &model, PriceTier::Standard))
+        .flatten()
     })?;
     match entry.long {
         LongContext::None => Some(entry.short),
@@ -607,11 +612,13 @@ mod tests {
     }
 
     #[test]
-    fn claude_fast_without_fast_price_bills_standard() {
+    fn claude_fast_without_fast_price_bills_standard_only_where_published() {
         assert_eq!(
             cost(CL, "claude-opus-4-6", Fast, usage(M, 0)),
             cost(CL, "claude-opus-4-6", Standard, usage(M, 0))
         );
+        assert_eq!(cost(CL, "claude-sonnet-5-5", Fast, usage(M, 0)), None);
+        assert_eq!(cost(CL, "claude-opus-4-7", Fast, usage(M, 0)), None);
     }
 
     #[test]

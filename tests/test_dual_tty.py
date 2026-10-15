@@ -24,6 +24,11 @@ print('TTY_READY',flush=True)
 if mode == 'read':
     value=input()
     sys.exit(17 if value=='hello' else 82)
+if mode == 'later-read':
+    while not os.path.exists('go-read'):
+        time.sleep(.05)
+    value=input()
+    sys.exit(17 if value=='hello' else 82)
 while not os.path.exists('exit-now'):
     time.sleep(.05)
 sys.exit(23)
@@ -275,6 +280,21 @@ class JobControlTests(unittest.TestCase):
         self.assertEqual(int(waited.group(1)), 23)
         # The shell still reads and writes the terminal in the foreground.
         self.assertIsNotNone(shell.read_match(rb'(?m)^FG_OK\r?$'), shell.output)
+
+    def test_foreground_after_background_returns_the_terminal_to_the_session(self):
+        root, shell, child, wrapper = self.start('later-read')
+        self.suspend(shell, child, wrapper)
+        shell.send(b'bg\n')
+        self.assertTrue(shell.read_until(b'PROMPT> '), shell.output)
+        shell.mark()
+        shell.send(b'fg\n', )
+        time.sleep(.5)
+        (root / 'go-read').write_text('')
+        time.sleep(.3)
+        shell.send(b'hello\n')
+        self.assertTrue(shell.read_until(b'PROMPT> '), shell.output)
+        self.assertNotIn(b'Stopped', shell.output)
+        self.assertEqual(self.exit_code(shell), 17)
 
     def test_killing_a_suspended_job_terminates_the_session(self):
         _, shell, child, wrapper = self.start('read')

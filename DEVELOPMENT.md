@@ -173,6 +173,20 @@ Defect found and fixed by the matrix: after SIGTERM the launcher killed Claude
 150 ms later, before it restored the terminal, leaving raw mode. The launcher now
 gives the child up to two seconds and restores the terminal modes saved at launch.
 
+An independent read-only source review of the branch then found, and this branch
+fixed: the certification harness could run outside its namespace under a
+`cargo test launch` filter and overwrite the real Codex credential file (it now
+requires the sandbox marker, `HOME=/home/test` and unguessable mode tokens, and
+`scripts/certify.py` checks that); concurrent supervisor unit tests competed for
+an interactive developer terminal (tests now run detached from it); `fg` after
+`bg` stopped the job again (the wrapper now hands the terminal back); missed poll
+ticks burst after a long suspension; termination handlers were installed only
+after the child started; owned-group cleanup returned before signalled members
+had exited; a reported standard speed did not override a fast request; responses
+without usage were shown as an exact $0.00; partially unreadable streams were
+shown as exact costs; the Claude fast-mode fallback covered more than the
+published Opus 4.6 case; and two certification checks could pass vacuously.
+
 Observed client behavior, identical without the launcher: Claude 2.1.300 runs
 Agent tool calls in the background and reports results in a later notification;
 its Bash tool detaches background jobs into their own session, so they survive

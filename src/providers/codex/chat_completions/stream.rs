@@ -224,7 +224,9 @@ impl StreamState {
         if self.include_usage {
             terminal["usage"] = self.completion.usage.value();
         }
-        if let Some(monitor) = self.ctx.monitor.as_ref() {
+        if let Some(monitor) = self.ctx.monitor.as_ref()
+            && self.completion.usage.is_reported()
+        {
             monitor.usage_final(&self.ctx.req_id, self.completion.usage.token_usage());
         }
         self.output.push_back(sse(terminal));

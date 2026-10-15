@@ -187,11 +187,8 @@ impl CodexProvider {
             let input_tokens = search::search_request_input_tokens(&search_request);
             let output_tokens = search::search_response_output_tokens(&search_response);
             if let Some(monitor) = ctx.monitor.as_ref() {
-                monitor.pricing_resolved(
-                    &ctx.req_id,
-                    &resolved.model,
-                    PriceTier::from_service_tier(resolved.service_tier.as_ref()),
-                );
+                // The search request carries no service tier.
+                monitor.pricing_resolved(&ctx.req_id, &resolved.model, PriceTier::Standard);
                 // Search token counts are local estimates, not provider usage.
                 monitor.usage_updated(&ctx.req_id, Some(input_tokens), Some(output_tokens));
                 monitor.cost_estimated(&ctx.req_id);
@@ -514,16 +511,11 @@ impl CodexProvider {
                 ctx.traffic.as_deref(),
             ) {
                 Ok(json) => {
-                    if let Some(monitor) = ctx.monitor.as_ref() {
-                        match reported_upstream_usage(&upstream.body) {
-                            Some(usage) => monitor.usage_final(&ctx.req_id, token_usage(&usage)),
-                            None => monitor.usage_updated(
-                                &ctx.req_id,
-                                json.pointer("/usage/input_tokens").and_then(|v| v.as_u64()),
-                                json.pointer("/usage/output_tokens")
-                                    .and_then(|v| v.as_u64()),
-                            ),
-                        }
+                    // Without upstream usage the response's zero counts are not usage.
+                    if let Some(monitor) = ctx.monitor.as_ref()
+                        && let Some(usage) = reported_upstream_usage(&upstream.body)
+                    {
+                        monitor.usage_final(&ctx.req_id, token_usage(&usage));
                     }
                     update_continuation_from_upstream(
                         ctx.session_id.as_deref(),

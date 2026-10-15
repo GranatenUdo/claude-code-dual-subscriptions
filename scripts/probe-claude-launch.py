@@ -25,8 +25,8 @@ PROJECT = HOME / 'project'
 RECORDS = Path('/tmp/records.jsonl')
 TOKEN = 'sk-ant-oat01-SYNTHETIC-OFFLINE-ONLY'
 BASE_ENV = {'HOME': str(HOME), 'PATH': '/usr/bin:/bin', 'TERM': 'xterm-256color',
-            'DISABLE_AUTOUPDATER': '1'}
-LAUNCH = ['/launcher', 'launch', '--claude', '/client', '--mock-record', str(RECORDS)]
+            'DISABLE_AUTOUPDATER': '1', 'CCD_CERTIFICATION_SANDBOX': '1'}
+LAUNCH = ['/launcher', '__ccd_cert_launch', '--claude', '/client', '--mock-record', str(RECORDS)]
 ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]|\x1b\].*?(?:\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b[78=>]')
 DOWN, CTRL_C, CTRL_Z = b'\x1b[B', b'\x03', b'\x1a'
 
@@ -323,8 +323,9 @@ def scenario_conversation():
 
 def direct_env():
     """Environment for a directly started client against the harness mock."""
-    server = subprocess.Popen(['/launcher', 'mock-serve', '--mock-record', '/tmp/direct.jsonl'],
-                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    server = subprocess.Popen(['/launcher', '__ccd_cert_mock_serve', '--mock-record', '/tmp/direct.jsonl'],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                              env=BASE_ENV)
     url = server.stdout.readline().strip().split('=', 1)[1]
     return server, {'ANTHROPIC_BASE_URL': url, 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC': '1',
                     'CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK': '1'}
@@ -465,6 +466,7 @@ def descendant_case(argv, env):
         session.submit('CERT-SPAWN')
         result['spawn_turn'] = session.wait_for('CERT-SPAWN-DONE-RAN', timeout=60) is not None
         spawned = int(pid_file.read_text().strip()) if pid_file.exists() else None
+        result['descendant_observed'] = spawned is not None and proc_state(spawned) not in (None, 'Z')
         client = process_pid('/client')
         client_groups = proc_groups(client) if client else None
         spawned_groups = proc_groups(spawned) if spawned else None
@@ -506,6 +508,7 @@ def scenario_descendants():
     evidence['detached_job_matches_direct'] = (
         launcher.get('spawned_alive_after_exit') == direct.get('spawned_alive_after_exit'))
     evidence['passed'] = (launcher.get('ready') and launcher.get('spawn_turn') and launcher.get('streaming')
+                          and launcher.get('descendant_observed') and direct.get('descendant_observed')
                           and launcher.get('exit_code') == 143
                           and not launcher.get('client_alive_after_exit')
                           and not launcher.get('client_group_alive_after_exit')
@@ -603,7 +606,8 @@ def scenario_refusals():
         return {'exit_code': result.returncode,
                 'refused_before_start': b'no listener or client was started' in result.stderr
                 or b'no listener was started' in result.stderr,
-                'no_upstream_request': not any(r.get('event') == 'anthropic' for r in records()),
+                # The harness opens the record file only after preflight passed.
+                'mocks_never_started': not RECORDS.exists(),
                 'secret_in_output': b'CANARY' in result.stdout + result.stderr}
 
     cases['auth_token_override'] = run({'ANTHROPIC_AUTH_TOKEN': 'SYNTHETIC-CANARY'})
@@ -614,7 +618,7 @@ def scenario_refusals():
     cases['project_model_setting'] = run(cwd=conflict)
     evidence.update(cases)
     evidence['passed'] = all(case['exit_code'] != 0 and case['refused_before_start']
-                             and case['no_upstream_request'] and not case['secret_in_output']
+                             and case['mocks_never_started'] and not case['secret_in_output']
                              for case in cases.values())
     return evidence
 
@@ -626,9 +630,9 @@ def scenario_managed():
     result = subprocess.run(LAUNCH, env=BASE_ENV, cwd=HOME, capture_output=True, timeout=30)
     evidence = {'scenario': 'managed', 'exit_code': result.returncode,
                 'refused_before_start': b'managed configuration present' in result.stderr,
-                'no_upstream_request': not any(r.get('event') == 'anthropic' for r in records())}
+                'mocks_never_started': not RECORDS.exists()}
     evidence['passed'] = (evidence['exit_code'] != 0 and evidence['refused_before_start']
-                          and evidence['no_upstream_request'])
+                          and evidence['mocks_never_started'])
     return evidence
 
 

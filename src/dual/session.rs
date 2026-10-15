@@ -13,6 +13,9 @@ pub struct LaunchSpec {
     cwd: PathBuf,
     resume: Option<String>,
     inherited: BTreeMap<String, String>,
+    /// Production sessions own the controlling terminal; unit tests run
+    /// concurrently and must not compete for the developer's terminal.
+    terminal: bool,
 }
 
 impl std::fmt::Debug for LaunchSpec {
@@ -55,7 +58,15 @@ impl LaunchSpec {
             cwd: cwd.into(),
             resume: resume.map(str::to_owned),
             inherited,
+            terminal: true,
         })
+    }
+
+    /// Supervises without touching the controlling terminal (tests only).
+    #[cfg(test)]
+    fn detached(mut self) -> Self {
+        self.terminal = false;
+        self
     }
 
     /// Never log the resulting Command: its environment includes a local secret.
@@ -91,10 +102,10 @@ pub async fn supervise(
     stop: impl std::future::Future<Output = i32>,
 ) -> anyhow::Result<i32> {
     #[cfg(unix)]
-    unsafe {
-        let foreground = libc::tcgetpgrp(libc::STDIN_FILENO);
+    if spec.terminal {
+        let foreground = unsafe { libc::tcgetpgrp(libc::STDIN_FILENO) };
         anyhow::ensure!(
-            foreground < 0 || foreground == libc::getpgrp(),
+            foreground < 0 || foreground == unsafe { libc::getpgrp() },
             "launch requires the foreground terminal; background invocation refused"
         );
     }
@@ -144,7 +155,11 @@ pub async fn supervise(
         command.process_group(0);
     }
     let child = command.spawn()?;
-    let _terminal = TerminalGuard::foreground(child.id());
+    let _terminal = if spec.terminal {
+        TerminalGuard::foreground(child.id())
+    } else {
+        TerminalGuard::none()
+    };
     struct ChildGuard(std::process::Child);
     impl Drop for ChildGuard {
         fn drop(&mut self) {
@@ -157,31 +172,47 @@ pub async fn supervise(
                 // and save the session before the group is killed.
                 libc::kill(-(self.0.id() as i32), libc::SIGTERM);
                 libc::kill(-(self.0.id() as i32), libc::SIGCONT);
+                let group = -(self.0.id() as i32);
                 let deadline = std::time::Instant::now() + CHILD_TERMINATION_GRACE;
                 while std::time::Instant::now() < deadline
                     && peek_exit_code(&mut self.0).ok().flatten().is_none()
                 {
                     std::thread::sleep(std::time::Duration::from_millis(20));
                 }
-                libc::kill(-(self.0.id() as i32), libc::SIGKILL);
+                libc::kill(group, libc::SIGKILL);
+                // Reap the leader, then wait until every owned process has
+                // actually gone: signal delivery is asynchronous.
+                let _ = self.0.wait();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                while libc::kill(group, 0) == 0 && std::time::Instant::now() < deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
             }
             #[cfg(not(unix))]
-            let _ = self.0.kill();
-            let _ = self.0.wait();
+            {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
         }
     }
     let mut child = ChildGuard(child);
     tokio::pin!(stop);
     let mut poll = tokio::time::interval(std::time::Duration::from_millis(20));
+    // After a long suspension, resume polling instead of replaying missed ticks.
+    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
             code = &mut stop => return Ok(code),
             _ = poll.tick() => {
                 if let Some(code) = peek_exit_code(&mut child.0)? { return Ok(code); }
                 #[cfg(target_os = "linux")]
-                if job_control::child_stopped(&child.0)? {
-                    // Blocks while this job is suspended; the shell resumes it.
-                    job_control::follow_child_stop(child.0.id() as i32);
+                if spec.terminal {
+                    if job_control::child_stopped(&child.0)? {
+                        // Blocks while this job is suspended; the shell resumes it.
+                        job_control::follow_child_stop(child.0.id() as i32);
+                    }
+                    // `fg` after `bg` gives the terminal to this wrapper's group.
+                    job_control::reclaim_foreground(child.0.id() as i32);
                 }
                 anyhow::ensure!(!server.1.as_ref().unwrap().is_finished(), "local listener stopped; child terminated");
             }
@@ -260,6 +291,17 @@ struct TerminalGuard(Option<(i32, i32, Option<libc::termios>)>);
 #[cfg(not(unix))]
 struct TerminalGuard;
 impl TerminalGuard {
+    fn none() -> Self {
+        #[cfg(unix)]
+        {
+            Self(None)
+        }
+        #[cfg(not(unix))]
+        {
+            Self
+        }
+    }
+
     fn foreground(child: u32) -> Self {
         #[cfg(unix)]
         unsafe {
@@ -338,12 +380,32 @@ mod job_control {
     /// to it, so `kill` returns only once the job has been continued. In an
     /// orphaned process group the kernel discards SIGTSTP and this returns
     /// immediately, resuming the child.
+    /// When the shell foregrounds this wrapper's group (`fg` after `bg`), the
+    /// child must own the terminal again.
+    pub(super) fn reclaim_foreground(child_pgid: i32) {
+        unsafe {
+            if libc::isatty(libc::STDIN_FILENO) == 1
+                && libc::tcgetpgrp(libc::STDIN_FILENO) == libc::getpgrp()
+            {
+                with_sigttou_blocked(|| libc::tcsetpgrp(libc::STDIN_FILENO, child_pgid));
+                libc::kill(-child_pgid, libc::SIGCONT);
+            }
+        }
+    }
+
     pub(super) fn follow_child_stop(child_pgid: i32) {
         unsafe {
             if libc::isatty(libc::STDIN_FILENO) != 1 {
                 return;
             }
             let wrapper_pgid = libc::getpgrp();
+            // The child stopped on a terminal read while this wrapper already
+            // holds the foreground (`fg` after `bg`): hand it over, don't stop.
+            if libc::tcgetpgrp(libc::STDIN_FILENO) == wrapper_pgid {
+                with_sigttou_blocked(|| libc::tcsetpgrp(libc::STDIN_FILENO, child_pgid));
+                libc::kill(-child_pgid, libc::SIGCONT);
+                return;
+            }
             if libc::tcgetpgrp(libc::STDIN_FILENO) == child_pgid {
                 with_sigttou_blocked(|| libc::tcsetpgrp(libc::STDIN_FILENO, wrapper_pgid));
             }
@@ -418,7 +480,9 @@ mod tests {
         let client = dir.path().join("fake-client");
         std::fs::write(&client, "#!/bin/sh\n[ \"$CLAUDE_CODE_SUBAGENT_MODEL\" = 'gpt-6-astra[1m]' ] || exit 90\n[ -z \"${ANTHROPIC_AUTH_TOKEN+x}\" ] || exit 91\nprintf '%s' \"$ANTHROPIC_BASE_URL\" > endpoint\nexit 17\n").unwrap();
         std::fs::set_permissions(&client, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let spec = LaunchSpec::new(&client, dir.path(), None, BTreeMap::new()).unwrap();
+        let spec = LaunchSpec::new(&client, dir.path(), None, BTreeMap::new())
+            .unwrap()
+            .detached();
         let code = supervise(&spec, axum::Router::new(), std::future::pending())
             .await
             .unwrap();
@@ -437,7 +501,9 @@ mod tests {
         let client = dir.path().join("fake-client");
         std::fs::write(&client, "#!/bin/sh\nexec /bin/sleep 60\n").unwrap();
         std::fs::set_permissions(&client, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let spec = LaunchSpec::new(&client, dir.path(), None, BTreeMap::new()).unwrap();
+        let spec = LaunchSpec::new(&client, dir.path(), None, BTreeMap::new())
+            .unwrap()
+            .detached();
         let start = std::time::Instant::now();
         let code = supervise(&spec, axum::Router::new(), async {
             tokio::time::sleep(std::time::Duration::from_millis(60)).await;
@@ -462,7 +528,9 @@ mod tests {
             )
             .unwrap();
             std::fs::set_permissions(&client, std::fs::Permissions::from_mode(0o700)).unwrap();
-            let spec = LaunchSpec::new(&client, dir.path(), None, BTreeMap::new()).unwrap();
+            let spec = LaunchSpec::new(&client, dir.path(), None, BTreeMap::new())
+                .unwrap()
+                .detached();
             let code = supervise(&spec, axum::Router::new(), std::future::pending())
                 .await
                 .unwrap();
@@ -509,7 +577,9 @@ mod tests {
                 }
             }),
         );
-        let spec = LaunchSpec::new(&client, dir.path(), None, BTreeMap::new()).unwrap();
+        let spec = LaunchSpec::new(&client, dir.path(), None, BTreeMap::new())
+            .unwrap()
+            .detached();
         let stop = async {
             tokio::time::timeout(std::time::Duration::from_secs(5), async {
                 while state.load(Ordering::SeqCst) != 1 {

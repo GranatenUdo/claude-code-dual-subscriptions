@@ -25,6 +25,17 @@ ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = ['conversation', 'terminal', 'suspend', 'descendants', 'errors', 'refusals', 'managed']
 
 
+def bwrap_base(client, launcher):
+    return ['bwrap', '--unshare-all', '--die-with-parent', '--new-session',
+            '--ro-bind', '/usr', '/usr', '--symlink', 'usr/bin', '/bin',
+            '--ro-bind', '/lib', '/lib', '--ro-bind', '/lib64', '/lib64',
+            '--ro-bind', str(client), '/client', '--ro-bind', str(launcher), '/launcher',
+            '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--dir', '/home/test',
+            '--chdir', '/home/test', '--clearenv', '--setenv', 'HOME', '/home/test',
+            '--setenv', 'PATH', '/usr/bin:/bin', '--setenv', 'DISABLE_AUTOUPDATER', '1',
+            '--setenv', 'CCD_CERTIFICATION_SANDBOX', '1']
+
+
 def harness_executable():
     build = subprocess.run(
         ['cargo', 'test', '--locked', '--test', 'dual_certification', '--no-run',
@@ -40,14 +51,8 @@ def harness_executable():
 
 
 def run_scenario(name, client, launcher, timeout):
-    command = ['bwrap', '--unshare-all', '--die-with-parent', '--new-session',
-               '--ro-bind', '/usr', '/usr', '--symlink', 'usr/bin', '/bin',
-               '--ro-bind', '/lib', '/lib', '--ro-bind', '/lib64', '/lib64',
-               '--ro-bind', str(client), '/client', '--ro-bind', str(launcher), '/launcher',
-               '--ro-bind', str(ROOT / 'scripts/probe-claude-launch.py'), '/certify_probe.py',
-               '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--dir', '/home/test',
-               '--chdir', '/home/test', '--clearenv', '--setenv', 'HOME', '/home/test',
-               '--setenv', 'PATH', '/usr/bin:/bin', '--setenv', 'DISABLE_AUTOUPDATER', '1']
+    command = bwrap_base(client, launcher) + [
+        '--ro-bind', str(ROOT / 'scripts/probe-claude-launch.py'), '/certify_probe.py']
     managed = None
     if name == 'managed':
         managed = tempfile.NamedTemporaryFile('w', suffix='.json', delete=False)
@@ -82,18 +87,36 @@ def main():
     args = parser.parse_args()
     client = args.client.resolve()
     assert client.is_file(), 'pinned client not found'
+    target = os.environ.get('CARGO_TARGET_DIR')
+    if not target or Path(target).resolve().is_relative_to(ROOT):
+        # A running proxy may execute from the repository's own target dir.
+        raise SystemExit('set CARGO_TARGET_DIR to a directory outside the repository')
     head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True,
                           text=True, check=True).stdout.strip()
     dirty = bool(subprocess.run(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=ROOT,
                                 capture_output=True, text=True, check=True).stdout.strip())
     launcher = harness_executable()
+    # The harness must stay inert outside the namespace: skipped under a
+    # cargo-style filter, refused when asked to launch with a real home.
+    with tempfile.TemporaryDirectory() as home:
+        skipped = subprocess.run([str(launcher), 'launch'], capture_output=True, text=True,
+                                 env={'HOME': home, 'PATH': '/usr/bin:/bin'}, timeout=30)
+        refused = subprocess.run([str(launcher), '__ccd_cert_launch', '--claude', str(client)],
+                                 capture_output=True, text=True, timeout=30,
+                                 env={'HOME': home, 'PATH': '/usr/bin:/bin',
+                                      'CCD_CERTIFICATION_SANDBOX': '1'})
+    harness_guard = {
+        'filter_skipped': skipped.returncode == 0 and 'skipped' in skipped.stdout,
+        'refused_outside_sandbox': refused.returncode == 2 and 'refusing' in refused.stderr,
+    }
+    version = subprocess.run(bwrap_base(client, launcher) + ['/client', '--version'],
+                             capture_output=True, text=True, timeout=60).stdout.strip()
     report = {
         'head': head,
         'worktree_dirty': dirty,
         'client_sha256': hashlib.sha256(client.read_bytes()).hexdigest(),
-        'client_version': subprocess.run([str(client), '--version'], capture_output=True, text=True,
-                                         env={'DISABLE_AUTOUPDATER': '1', 'HOME': '/nonexistent',
-                                              'PATH': '/usr/bin:/bin'}).stdout.strip(),
+        'client_version': version,
+        'harness_guard': harness_guard,
         'scenarios': [],
     }
     for name in args.scenarios:
@@ -101,7 +124,8 @@ def main():
         report['scenarios'].append(evidence)
         print(f"{name}: {'PASS' if evidence.get('passed') else 'FAIL'} ({evidence['seconds']}s)",
               flush=True)
-    report['passed'] = all(item.get('passed') for item in report['scenarios'])
+    report['passed'] = (all(item.get('passed') for item in report['scenarios'])
+                        and all(harness_guard.values()))
     args.out.mkdir(parents=True, exist_ok=True)
     path = args.out / f'certification-{head[:12]}.json'
     path.write_text(json.dumps(report, indent=2) + '\n')

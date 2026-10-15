@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 
+#[cfg(target_os = "linux")]
 #[test]
 fn missing_client_fails_without_creating_state() {
     let dir = tempfile::tempdir().unwrap();

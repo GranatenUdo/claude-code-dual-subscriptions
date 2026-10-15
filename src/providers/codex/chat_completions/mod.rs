@@ -88,21 +88,11 @@ impl ChatCompletionsBackend {
             Ok(completion) => completion,
             Err(error) => return error.response(),
         };
-        if let Some(monitor) = ctx.monitor.as_ref() {
-            match crate::providers::codex::reported_upstream_usage(&bytes) {
-                Some(usage) => {
-                    monitor.usage_final(&ctx.req_id, crate::providers::codex::token_usage(&usage));
-                }
-                None => {
-                    if let Some(usage) = completion.get("usage") {
-                        monitor.usage_updated(
-                            &ctx.req_id,
-                            usage.get("prompt_tokens").and_then(Value::as_u64),
-                            usage.get("completion_tokens").and_then(Value::as_u64),
-                        );
-                    }
-                }
-            }
+        // Without upstream usage the response's zero counts are not usage.
+        if let Some(monitor) = ctx.monitor.as_ref()
+            && let Some(usage) = crate::providers::codex::reported_upstream_usage(&bytes)
+        {
+            monitor.usage_final(&ctx.req_id, crate::providers::codex::token_usage(&usage));
         }
         if let Some(traffic) = ctx.traffic.as_deref() {
             traffic.write_json("050-openai-chat-completion-response", &completion);

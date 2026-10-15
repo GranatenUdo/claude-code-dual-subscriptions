@@ -64,8 +64,9 @@ impl UsageAccumulator {
                 observed = true;
             }
         }
-        if usage.get("speed").and_then(Value::as_str) == Some("fast") {
-            self.fast = true;
+        // The reported speed is authoritative over the requested one.
+        if let Some(speed) = usage.get("speed").and_then(Value::as_str) {
+            self.fast = speed == "fast";
         }
         // A server-side fallback bills several attempts; top-level usage covers
         // only the returned one, so the cost becomes an estimate.
@@ -224,7 +225,11 @@ impl Observation {
                     }
                     Err(_) => {
                         // Observation must never alter the relayed bytes or grow without bound.
+                        // Usage seen so far may be partial, so its cost is an estimate.
                         *self = Self::Opaque;
+                        if let Some(monitor) = &ctx.monitor {
+                            monitor.cost_estimated(&ctx.req_id);
+                        }
                     }
                 }
                 if let Some(monitor) = &ctx.monitor {

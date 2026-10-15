@@ -622,3 +622,31 @@ async fn unobservable_success_body_is_counted_unmetered() {
     assert_eq!(snapshot.cost.unmetered, 1);
     assert_eq!(snapshot.cost.micros, 0);
 }
+
+#[tokio::test]
+async fn reported_standard_speed_overrides_a_fast_request() {
+    let upstream = json_upstream(
+        r#"{"type":"message","model":"claude-opus-5-5","content":[],"usage":{"input_tokens":1000,"output_tokens":100,"speed":"standard"}}"#,
+        None,
+    )
+    .await;
+    let monitor = MonitorHandle::default();
+    proxy(&upstream, &monitor)
+        .oneshot(request(
+            "/v1/messages",
+            r#"{"model":"claude-opus-5-5","speed":"fast","messages":[]}"#,
+        ))
+        .await
+        .unwrap()
+        .into_body()
+        .collect()
+        .await
+        .unwrap();
+    let cost = monitor.snapshot().recent[0]
+        .usage_detail
+        .cost
+        .clone()
+        .unwrap();
+    assert_eq!(cost.tier, claude_code_proxy::pricing::PriceTier::Standard);
+    assert_eq!(cost.micros, Some(1_000 * 4 + 100 * 20));
+}

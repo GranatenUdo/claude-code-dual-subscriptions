@@ -1,15 +1,19 @@
 //! Test-only certification harness for `claude-code-dual launch`.
 //!
-//! Built only by `cargo test`. Run without arguments (as `cargo test` does) it
-//! skips. `scripts/certify.py` runs it inside a bwrap namespace as
-//! `dual_certification launch --claude /client [--resume ID]
+//! Built only by `cargo test`. Run by `cargo test`, with or without a filter,
+//! it skips. `scripts/certify.py` runs it inside a bwrap namespace as
+//! `dual_certification __ccd_cert_launch --claude /client [--resume ID]
 //! --mock-record PATH`, where it performs the production preflight, scopes
 //! the environment, and supervises the real client through the production
 //! router, with both providers pointed at in-process mock upstreams. The
 //! production binary has no way to change its upstreams.
 //!
-//! `dual_certification mock-serve --mock-record PATH` serves only the
-//! Anthropic mock, so a directly started client can be compared.
+//! `dual_certification __ccd_cert_mock_serve --mock-record PATH` serves only
+//! the Anthropic mock, so a directly started client can be compared.
+//!
+//! Both modes refuse to run outside the certification namespace: they require
+//! `CCD_CERTIFICATION_SANDBOX=1` and the synthetic `HOME=/home/test`, because
+//! the harness writes synthetic Codex credentials into the scoped home.
 use std::{
     ffi::OsString,
     io::Write,
@@ -54,18 +58,39 @@ use tokio_tungstenite::tungstenite::Message;
 
 const SYNTHETIC_OAUTH: &str = "Bearer sk-ant-oat01-SYNTHETIC-OFFLINE-ONLY";
 
+const LAUNCH_MODE: &str = "__ccd_cert_launch";
+const MOCK_SERVE_MODE: &str = "__ccd_cert_mock_serve";
+const SANDBOX_HOME: &str = "/home/test";
+
 fn main() -> ExitCode {
     let mut args: Vec<OsString> = std::env::args_os().collect();
     let mode = args.get(1).and_then(|arg| arg.to_str()).map(str::to_owned);
-    let record = take_option(&mut args, "--mock-record");
-    match mode.as_deref() {
-        Some("launch") => certify_launch(args, record),
-        Some("mock-serve") => mock_serve(record),
-        _ => {
-            println!("dual_certification: skipped (probe-driven)");
-            ExitCode::SUCCESS
-        }
+    if !matches!(mode.as_deref(), Some(LAUNCH_MODE | MOCK_SERVE_MODE)) {
+        println!("dual_certification: skipped (probe-driven)");
+        return ExitCode::SUCCESS;
     }
+    if !in_certification_sandbox() {
+        eprintln!(
+            "dual_certification: refusing to run outside the certification namespace; use scripts/certify.py"
+        );
+        return ExitCode::from(2);
+    }
+    let record = take_option(&mut args, "--mock-record");
+    if mode.as_deref() == Some(MOCK_SERVE_MODE) {
+        return mock_serve(record);
+    }
+    args[1] = OsString::from("launch");
+    certify_launch(args, record)
+}
+
+/// The harness replaces the Codex credential file in the scoped home, so it
+/// only runs where that home is the synthetic one bwrap provides.
+fn in_certification_sandbox() -> bool {
+    std::env::var_os("CCD_CERTIFICATION_SANDBOX").is_some_and(|value| value == "1")
+        && std::env::var_os("HOME").is_some_and(|home| home == SANDBOX_HOME)
+        && file_store()
+            .auth_path()
+            .starts_with(&format!("{SANDBOX_HOME}/"))
 }
 
 fn take_option(args: &mut Vec<OsString>, name: &str) -> Option<String> {

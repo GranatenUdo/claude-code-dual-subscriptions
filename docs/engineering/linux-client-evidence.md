@@ -82,3 +82,9 @@ was demonstrated and no safety gate was bypassed. This establishes startup,
 trust-gate input and termination only; complete interactive conversations and
 Ctrl-Z/suspend/resume job control remain unverified. Do not name the script
 `/tty.py`, which shadows Python's standard module.
+
+Certification on 2026-10-15 (Claude Code 2.1.300) replaced these separate probes
+with `scripts/certify.py`, which drives the real client through the production
+launcher path inside the same kind of namespace. It covers complete interactive
+conversations and Ctrl-Z/`fg` job control; results and the observed client
+behaviors are recorded in `DEVELOPMENT.md`.

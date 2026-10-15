@@ -4,8 +4,9 @@ A development fork for switching between native Claude models using Claude Code'
 saved claude.ai subscription login and GPT models using the proxy's separate
 ChatGPT/Codex OAuth login, within one Claude Code session.
 
-**Status:** 1,150 local tests passed, including nine Anthropic mock integration
-tests. The user confirmed Opus 5.5 parent + Astra subagent operation on Claude Code
+**Status:** 1,189 local tests passed, including the Anthropic mock integration
+tests, and the experimental launcher passed a local actual-client certification
+matrix on Claude Code 2.1.300 with synthetic upstreams. The user confirmed Opus 5.5 parent + Astra subagent operation on Claude Code
 2.1.299; broader live regression and 1M-token inference remain unverified. Anthropic does not officially support
 non-Claude model routing. The inherited LRU advisories remain unresolved; see
 [validation](DEVELOPMENT.md) and [dependency review](DEPENDENCY-REVIEW.md).

@@ -13,7 +13,9 @@ Scope: Linux x86_64 GNU; Ubuntu 24.04/26.04 and WSL2 running those distributions
 - [x] Explicit discovery as WSL user renade found `/home/renade/.local/bin/claude` pointing to version 2.1.299. The earlier default-user PATH lookup was insufficient. Ubuntu-26.04 is x86_64, glibc 2.43.
 - [x] Actual Linux Claude 2.1.299 in a bwrap network/filesystem namespace sent synthetic saved OAuth, OAuth beta and the separate local capability together to the loopback mock; no API key, no secret in captured output. No real credentials inspected. See `linux-client-evidence.md`.
 - [x] Actual-client synthetic model precedence, explicit reviewer, resume and local safety-hook/denied-tool checks passed. Corrected terminal probes established trust-refusal input and SIGTERM status. See `linux-client-evidence.md` for the isolation and limits.
-- [ ] Remaining actual-client gates: full interactive conversations, Ctrl-Z/suspend/resume job control, broader fallback and remote managed policy. Descendant cleanup and active-request cancellation have fake-client coverage only; intentionally daemonized descendants remain outside the contract.
+- [x] Re-pinned to Claude 2.1.300 after the unchanged synthetic contract probe passed on a pinned copy.
+- [x] Actual-client certification through the real launcher preflight and supervisor (`scripts/certify.py`, test-only harness `tests/dual_certification.rs`): interactive conversations, tools, denied tool and safety hook, MCP, Astra worker, Opus reviewer, resume, Ctrl-C/SIGTERM/exit compared with direct Claude, terminal restoration, background-start refusal, three Ctrl-Z/`fg` cycles, owned-group cleanup and active-request cancellation, synthetic 401/429/5xx/interrupted/unsupported-model errors, and configuration refusals. See `DEVELOPMENT.md`.
+- [ ] Remote managed policy remains uncertified; intentionally detached descendants remain outside the contract.
 - [ ] BLOCKED: published artifacts/trust bootstrap; no releases exist. A user-supplied local artifact/hash is a developer staging mechanism, not a verified release channel.
 
 ## Tasks and acceptance

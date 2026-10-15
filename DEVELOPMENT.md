@@ -126,3 +126,64 @@ Documentation validation passed: `bun run build` generated 25 pages and
 `bun run check:links` checked 1,791 internal links/assets. Diff review and
 `git diff --check` passed; user-facing Aven/Grok references remain absent.
 No implementation tests were rerun for this docs-only follow-up.
+
+## Local certification and cost display — 2026-10-15
+
+Re-pinned to Claude Code **2.1.300** (pinned copy, sha256
+`674deba0bba9aee479f4503c438b49303b6fdd304b9a471b14977aaec5215453`) after the
+unchanged synthetic contract probe passed all five scenarios. WSL2 Ubuntu 26.04,
+x86_64, Rust 1.99.0, separate `CARGO_TARGET_DIR` and temporary `HOME`.
+
+- `cargo test --all --locked`: **1,189 passed, zero failures** (baseline 1,150).
+  Formatting, strict all-target Clippy (`-D warnings`) and the locked build passed.
+- Python: **16** installer/downloader tests and **10** PTY tests. The PTY tests run
+  the launcher as a job of an interactive bash and cover three Ctrl-Z/`fg` cycles,
+  `bg` completion with the shell keeping the terminal, `kill %1` of a suspended
+  job (143), SIGHUP (129), the orphaned process group case, and terminal modes
+  restored after a child killed in raw mode.
+- Docs: **25 pages built; 1,794 internal links/assets checked** (bun 1.3.13).
+- Actual-client certification matrix, `scripts/certify.py --client <pinned>`:
+  the real Claude 2.1.300 interface drives the production launcher preflight,
+  environment scoping, capability layer, router and supervisor, built as the
+  test-only harness `tests/dual_certification.rs` with both providers pointed at
+  in-process mocks. Each scenario runs in its own bwrap namespace without host
+  network, real home or credentials. All seven passed:
+  - **conversation:** two streaming turns, allowed Read, denied Bash with the
+    UserPromptSubmit safety hook (sentinel absent), a local stdio MCP tool, the
+    Astra worker over the Codex WebSocket path with synthetic Codex auth, the
+    explicit Opus reviewer, persisted session and `--resume` with history,
+    `/exit` 0, terminal restored, saved OAuth and OAuth beta on every request,
+    capability never upstream, no secret in terminal output;
+  - **terminal:** `/exit`, SIGTERM (143) and Ctrl-C mid-stream match a directly
+    started client, terminal modes restored, the interrupted stream is cancelled
+    upstream, background start refused;
+  - **suspend:** three Ctrl-Z/`fg` cycles through bash, launcher and client both
+    stopped, a turn answered after each `fg`, exit 0;
+  - **descendants:** SIGTERM mid-stream ends the owned process group and cancels
+    the active upstream request;
+  - **errors:** synthetic 401, 429, 500, interrupted stream and unsupported model
+    end in bounded API errors (10 client retries, about 3 minutes, for
+    429/5xx/interrupt), with no model or provider switch, and the session
+    recovers;
+  - **refusals / managed:** auth and model overrides, a project model setting and
+    `/etc/claude-code/managed-settings.json` are refused before any listener or
+    client starts.
+
+Defect found and fixed by the matrix: after SIGTERM the launcher killed Claude
+150 ms later, before it restored the terminal, leaving raw mode. The launcher now
+gives the child up to two seconds and restores the terminal modes saved at launch.
+
+Observed client behavior, identical without the launcher: Claude 2.1.300 runs
+Agent tool calls in the background and reports results in a later notification;
+its Bash tool detaches background jobs into their own session, so they survive
+exit (outside the launcher contract); and on an unsupported-model 404 it sends two
+non-streaming retries despite `CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1`. The
+certification accepts that last case only because the directly started client
+sends the same requests; there is no non-streaming request for 429, 5xx or
+interrupted streams.
+
+The monitor now shows the API-equivalent cost of native Claude and Codex traffic
+at hardcoded list prices (`src/pricing.rs`, prices as of 2026-10-14). Not
+certified: remote managed policy, live subscription acceptance and refresh,
+million-token capacity, other platforms and release distribution. No live calls,
+real credentials, installations, settings changes or releases were involved.

@@ -7,6 +7,10 @@ description: Fork development notes and retained upstream release history.
 
 Native Claude subscription passthrough and separate Codex OAuth can share one Claude Code session in opt-in Anthropic alias mode. Mock validation passed; the user confirmed Opus 5.5 parent + Astra subagent operation on Claude Code 2.1.299. Broader live validation remains outstanding. This fork has no published releases. Build from this repository's source.
 
+The monitor shows the API-equivalent cost of native Claude and Codex traffic at hardcoded list prices (as of 2026-10-14): a header total, Cost columns, per-model session breakdowns and per-request cache detail. Native Claude cache reads and writes and Codex cached input are now tracked; on native `/v1/responses` and Chat Completions the monitor's `input_tokens` excludes cached tokens.
+
+The experimental Linux `claude-code-dual` launcher candidate is included; see the launcher guide.
+
 Documentation now describes dual authentication, native routing, mixed-history limits and local-only documentation. Promotional material has been removed. The following versioned entries are selected upstream history (complete original notes remain in Git history); their release references belong to the original project.
 
 ## v0.1.45 (2026-10-10)

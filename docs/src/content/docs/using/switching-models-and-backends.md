@@ -29,7 +29,7 @@ After the current response and all tool results are complete:
 ```
 
 With `aliasProvider=anthropic`, `sonnet` maps to `claude-sonnet-5`,
-`opus` to `claude-opus-5`, `haiku` to `claude-haiku-4-5`, and `fable`
+`opus` to `claude-opus-5-5`, `haiku` to `claude-haiku-4-5`, and `fable`
 to `claude-fable-5`. Prefer explicit IDs when a different native version is
 required. Account access is separate from local registration.
 

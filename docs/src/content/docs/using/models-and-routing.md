@@ -17,7 +17,14 @@ The model ID in each request selects its provider. For dual subscriptions explic
 
 In dual mode, any `claude-*` ID is forwarded to Anthropic for validation. Other unknown IDs return HTTP 400 with the supported provider catalog. There is no implicit fallback for arbitrary model names.
 
-Native short aliases resolve as follows: `haiku` → `claude-haiku-4-5`, `sonnet` → `claude-sonnet-5`, `opus` → `claude-opus-5`, `fable` → `claude-fable-5`. Native Claude also bypasses auto-review overrides.
+Sol requires the exact registered ID `gpt-6.1-sol`. `gpt-6.1-sol[1m]` normalizes
+to that ID; `gpt-6.1` and `gpt-6.1[1m]` return HTTP 400. Session affinity and
+Codex model overrides do not turn an unknown ID into a registered model.
+These rules describe `claude-code-proxy`; the separate experimental
+`claude-code-dual` launcher currently allows only Astra for Codex workers and
+rejects Sol.
+
+Native short aliases resolve as follows: `haiku` → `claude-haiku-4-5`, `sonnet` → `claude-sonnet-5`, `opus` → `claude-opus-5-5`, `fable` → `claude-fable-5`. Native Claude also bypasses auto-review overrides.
 
 ## Prefer the local catalog
 
@@ -96,4 +103,6 @@ With `anthropic`, Claude aliases and explicit `claude-*` IDs go to [Anthropic](/
 
 ## Parent and subagent selection
 
-The confirmed setup keeps Opus 5.5 as parent and uses `CLAUDE_CODE_SUBAGENT_MODEL=gpt-6-astra[1m]` for general-purpose. Agent-type names and model IDs are distinct. See [subagent precedence and verification](/using/subagents/).
+The user-confirmed setup keeps Opus 5.5 as parent and uses `CLAUDE_CODE_SUBAGENT_MODEL=gpt-6-astra[1m]` for general-purpose. The user also reported selecting Sol through a named agent without changing that default. Its frontmatter uses `model: gpt-6.1-sol[1m]` and `effort: medium`; invoke the named agent without a per-call model override and leave FORCE unset. This mixed result has not been independently live-tested here and does not prove 1M capacity.
+
+Agent-type names, loaded definitions and model IDs are distinct. `/agents` checks discovery; provider/model records and transcripts check routing. On Claude Code 2.1.299, per-call selection precedes the definition, environment default and parent. Model/effort overrides can affect the final request. See [the named agent example and verification](/using/subagents/#select-sol-for-a-named-agent).

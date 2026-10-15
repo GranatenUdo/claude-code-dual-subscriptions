@@ -1,8 +1,8 @@
 //! Immutable dashboard read models. Process-local clocks and mutable accounting
 //! stay in the monitor store; viewers receive elapsed durations and computed rates.
 use super::{
-    ActiveRequest, CompletedRequest, EndpointKind, MonitorState, RequestStatus, SessionSummary,
-    Throughput,
+    ActiveRequest, CompletedRequest, CostTotals, EndpointKind, MonitorState, RequestCost,
+    RequestStatus, SessionSummary, Throughput,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -76,6 +76,11 @@ pub struct MonitorSnapshot {
     pub sessions: Vec<SessionSnapshot>,
     pub active: Vec<ActiveSnapshot>,
     pub recent: Vec<CompletedSnapshot>,
+    /// API-equivalent cost since the proxy started; absent from older proxies.
+    #[serde(default)]
+    pub cost: Option<CostTotals>,
+    #[serde(default)]
+    pub prices_as_of: Option<String>,
 }
 
 impl From<MonitorState> for MonitorSnapshot {
@@ -87,6 +92,8 @@ impl From<MonitorState> for MonitorSnapshot {
             sessions: state.sessions.into_iter().map(Into::into).collect(),
             active: state.active.into_iter().map(Into::into).collect(),
             recent: state.recent.into_iter().map(Into::into).collect(),
+            cost: Some(state.cost),
+            prices_as_of: Some(crate::pricing::PRICES_AS_OF.to_string()),
         }
     }
 }
@@ -110,6 +117,14 @@ pub struct ActiveSnapshot {
     pub stream_chunks: u64,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_read_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_write_5m_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_write_1h_tokens: Option<u64>,
+    #[serde(default)]
+    pub cost: Option<RequestCost>,
     pub error: Option<String>,
     pub traffic_capture_path: Option<PathBuf>,
     elapsed: Duration,
@@ -147,6 +162,10 @@ impl From<ActiveRequest> for ActiveSnapshot {
             stream_chunks: value.stream_chunks,
             input_tokens: value.input_tokens,
             output_tokens: value.output_tokens,
+            cache_read_tokens: value.usage_detail.cache_read_tokens,
+            cache_write_5m_tokens: value.usage_detail.cache_write_5m_tokens,
+            cache_write_1h_tokens: value.usage_detail.cache_write_1h_tokens,
+            cost: value.usage_detail.cost,
             error: value.error,
             traffic_capture_path: value.traffic_capture_path,
             elapsed,
@@ -173,6 +192,14 @@ pub struct CompletedSnapshot {
     pub stream_chunks: u64,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_read_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_write_5m_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_write_1h_tokens: Option<u64>,
+    #[serde(default)]
+    pub cost: Option<RequestCost>,
     pub error: Option<String>,
     pub traffic_capture_path: Option<PathBuf>,
     pub finished_at: SystemTime,
@@ -208,6 +235,10 @@ impl From<CompletedRequest> for CompletedSnapshot {
             stream_chunks: value.stream_chunks,
             input_tokens: value.input_tokens,
             output_tokens: value.output_tokens,
+            cache_read_tokens: value.usage_detail.cache_read_tokens,
+            cache_write_5m_tokens: value.usage_detail.cache_write_5m_tokens,
+            cache_write_1h_tokens: value.usage_detail.cache_write_1h_tokens,
+            cost: value.usage_detail.cost,
             error: value.error,
             traffic_capture_path: value.traffic_capture_path,
             finished_at: value.finished_at,
@@ -233,6 +264,8 @@ pub struct SessionSnapshot {
     pub output_token_samples: Vec<(SystemTime, u64)>,
     pub generation_duration: Duration,
     pub last_status: String,
+    #[serde(default)]
+    pub cost: Option<CostTotals>,
     throughput: Throughput,
 }
 
@@ -260,6 +293,7 @@ impl From<SessionSummary> for SessionSnapshot {
             output_token_samples: value.output_token_samples,
             generation_duration: value.generation_duration,
             last_status: value.last_status,
+            cost: Some(value.cost),
             throughput,
         }
     }
@@ -314,8 +348,12 @@ mod tests {
         let snapshot: MonitorSnapshot = MonitorHandle::default().snapshot().into();
         let mut legacy = serde_json::to_value(&snapshot).unwrap();
         legacy.as_object_mut().unwrap().remove("snapshot_at");
+        legacy.as_object_mut().unwrap().remove("cost");
+        legacy.as_object_mut().unwrap().remove("prices_as_of");
         let decoded: MonitorSnapshot = serde_json::from_value(legacy).unwrap();
         assert!(decoded.snapshot_at >= snapshot.started_at);
+        assert_eq!(decoded.cost, None);
+        assert_eq!(decoded.prices_as_of, None);
 
         let mut newer = serde_json::to_value(&snapshot).unwrap();
         newer
@@ -324,5 +362,50 @@ mod tests {
             .insert("future_field".into(), serde_json::json!(true));
         let decoded: MonitorSnapshot = serde_json::from_value(newer).unwrap();
         assert_eq!(decoded.snapshot_at, snapshot.snapshot_at);
+    }
+}
+
+#[cfg(test)]
+mod cost_tests {
+    use super::*;
+    use crate::monitor::{CostStatus, MonitorHandle, TokenUsage};
+
+    #[test]
+    fn request_and_session_snapshots_without_cost_fields_still_decode() {
+        let monitor = MonitorHandle::default();
+        monitor.request_started("done", Some("s".into()), Some(1), EndpointKind::Messages);
+        monitor.provider_selected("done", "anthropic", "claude-opus-5-5", None);
+        monitor.usage_final(
+            "done",
+            TokenUsage {
+                input: Some(10),
+                cache_read: Some(1_000),
+                output: Some(5),
+                ..TokenUsage::default()
+            },
+        );
+        monitor.request_completed("done", 200, None, None);
+        let snapshot = MonitorSnapshot::from(monitor.snapshot());
+        assert_eq!(
+            snapshot.recent[0].cost.as_ref().map(|cost| cost.status),
+            Some(CostStatus::Priced)
+        );
+        let mut legacy = serde_json::to_value(&snapshot).unwrap();
+        for field in [
+            "cache_read_tokens",
+            "cache_write_5m_tokens",
+            "cache_write_1h_tokens",
+            "cost",
+        ] {
+            legacy["recent"][0].as_object_mut().unwrap().remove(field);
+        }
+        legacy["sessions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("cost");
+        let decoded: MonitorSnapshot = serde_json::from_value(legacy).unwrap();
+        assert_eq!(decoded.recent[0].cost, None);
+        assert_eq!(decoded.recent[0].cache_read_tokens, None);
+        assert_eq!(decoded.sessions[0].cost, None);
     }
 }

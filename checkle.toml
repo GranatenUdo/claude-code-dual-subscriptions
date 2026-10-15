@@ -10,6 +10,7 @@ command = [
   "cargo",
   "clippy",
   "--all-targets",
+  "--locked",
   "--message-format=json",
   "--",
   "-D",
@@ -19,12 +20,12 @@ command = [
 [[check]]
 name = "build"
 mode = "cargo"
-command = ["cargo", "build", "--all", "--message-format=json"]
+command = ["cargo", "build", "--all", "--locked", "--message-format=json"]
 
 [[check]]
 name = "test"
 mode = "cargo"
-command = ["cargo", "test", "--all", "--message-format=json"]
+command = ["cargo", "test", "--all", "--locked", "--message-format=json"]
 
 [[group]]
 name = "all"

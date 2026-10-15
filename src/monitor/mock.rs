@@ -5,8 +5,8 @@ use std::{
 };
 
 use super::{
-    ActiveRequest, CompletedRequest, EndpointKind, MonitorState, RequestStatus, SessionUsage,
-    session_summaries,
+    ActiveRequest, CompletedRequest, CostTotals, EndpointKind, MonitorState, RequestStatus,
+    SessionUsage, UsageDetail, session_summaries,
 };
 
 const TICK_MILLIS: u64 = 250;
@@ -105,6 +105,8 @@ fn mock_state_for_tick(
         Some(instant_now - Duration::from_secs(10) - simulated_elapsed);
     streaming.output_tokens = Some(420_u64.saturating_add(simulated_output_tokens(tick)));
     streaming.input_tokens = Some(12_480_u64.saturating_add(tick / 4));
+    streaming.usage_detail.resolved_model = Some("gpt-5.6-sol".to_string());
+    streaming.usage_detail.cache_read_tokens = Some(86_400);
     streaming.streamed_bytes = 18_432_u64.saturating_add(tick.saturating_mul(384));
     streaming.stream_chunks = 96_u64.saturating_add(tick.saturating_mul(3));
     streaming.generation_duration = Some(Duration::from_secs(4));
@@ -197,12 +199,63 @@ fn mock_state_for_tick(
     success.generation_initial_output_tokens = 32;
     success.streamed_bytes = 24_576;
     success.stream_chunks = 142;
-    success.input_tokens = Some(125_600);
+    success.input_tokens = Some(25_600);
     success.output_tokens = Some(832);
+    success.usage_detail.resolved_model = Some("gpt-5.6-terra".to_string());
+    success.usage_detail.cache_read_tokens = Some(100_000);
     success.traffic_capture_path = Some(PathBuf::from(
         "/tmp/claude-code-proxy-demo/traffic/req-complete-codex",
     ));
     recent.push_back(success);
+
+    let mut claude = completed_request(
+        now,
+        "req-complete-claude",
+        Some("57c7c914-ada4-4f40-9672-985f950fbb66"),
+        Some(10),
+        EndpointKind::Messages,
+        Duration::from_secs(29),
+        Duration::from_millis(9_140),
+        RequestStatus::Completed,
+        Some(200),
+    );
+    claude.project = Some("claude-code-proxy".to_string());
+    claude.provider = Some("anthropic".to_string());
+    claude.model = Some("opus → claude-opus-5-5".to_string());
+    claude.effort = Some("medium".to_string());
+    claude.generation_duration = Some(Duration::from_secs(8));
+    claude.streamed_bytes = 41_216;
+    claude.stream_chunks = 188;
+    claude.input_tokens = Some(2_310);
+    claude.output_tokens = Some(1_240);
+    claude.usage_detail.resolved_model = Some("claude-opus-5-5".to_string());
+    claude.usage_detail.cache_read_tokens = Some(184_500);
+    claude.usage_detail.cache_write_5m_tokens = Some(6_200);
+    recent.push_back(claude);
+
+    let mut astra = completed_request(
+        now,
+        "req-complete-astra",
+        Some("57c7c914-ada4-4f40-9672-985f950fbb66"),
+        Some(9),
+        EndpointKind::Messages,
+        Duration::from_secs(36),
+        Duration::from_millis(6_480),
+        RequestStatus::Completed,
+        Some(200),
+    );
+    astra.project = Some("claude-code-proxy".to_string());
+    astra.provider = Some("codex".to_string());
+    astra.model = Some("gpt-6-astra".to_string());
+    astra.effort = Some("medium".to_string());
+    astra.generation_duration = Some(Duration::from_secs(5));
+    astra.streamed_bytes = 30_720;
+    astra.stream_chunks = 151;
+    astra.input_tokens = Some(9_800);
+    astra.output_tokens = Some(2_150);
+    astra.usage_detail.resolved_model = Some("gpt-6-astra".to_string());
+    astra.usage_detail.cache_read_tokens = Some(141_000);
+    recent.push_back(astra);
 
     let mut unavailable = completed_request(
         now,
@@ -276,6 +329,7 @@ fn mock_state_for_tick(
     events.project = Some("provider-playground".to_string());
     events.provider = Some("codex".to_string());
     events.model = Some("gpt-5.6-luna".to_string());
+    events.usage_detail.resolved_model = Some("gpt-5.6-luna".to_string());
     events.generation_duration = Some(Duration::from_secs(4));
     events.stream_chunks = 48;
     recent.push_back(events);
@@ -326,6 +380,7 @@ fn mock_state_for_tick(
     server_error.project = Some("provider-playground".to_string());
     server_error.provider = Some("codex".to_string());
     server_error.model = Some("gpt-5.5".to_string());
+    server_error.usage_detail.resolved_model = Some("gpt-5.5".to_string());
     server_error.effort = Some("medium".to_string());
     server_error.error =
         Some("response translation failed: missing message stop event".to_string());
@@ -345,6 +400,7 @@ fn mock_state_for_tick(
     no_status.project = Some("automation-sandbox".to_string());
     no_status.provider = Some("codex".to_string());
     no_status.model = Some("gpt-5.4-mini".to_string());
+    no_status.usage_detail.resolved_model = Some("gpt-5.4-mini".to_string());
     no_status.error = Some("request future ended before completion".to_string());
     recent.push_back(no_status);
 
@@ -368,6 +424,42 @@ fn mock_state_for_tick(
             .output_tokens
             .saturating_add(request.output_tokens.unwrap_or(0));
     }
+    let mut cost = CostTotals::default();
+    let priced = active
+        .iter_mut()
+        .map(|request| {
+            (
+                request.session_id.clone(),
+                request.usage_detail.price(
+                    request.provider.as_deref(),
+                    request.endpoint,
+                    request.input_tokens,
+                    request.output_tokens,
+                ),
+            )
+        })
+        .chain(recent.iter_mut().map(|request| {
+            (
+                request.session_id.clone(),
+                request.usage_detail.price(
+                    request.provider.as_deref(),
+                    request.endpoint,
+                    request.input_tokens,
+                    request.output_tokens,
+                ),
+            )
+        }))
+        .collect::<Vec<_>>();
+    for (session_id, change) in priced {
+        if let Some((old, new)) = change {
+            cost.apply(&old, &new);
+            session_usage
+                .entry(session_id)
+                .or_default()
+                .cost
+                .apply(&old, &new);
+        }
+    }
     let sessions = session_summaries(&active, &recent, &session_usage, output_buckets, now);
     MonitorState {
         started_at,
@@ -375,6 +467,7 @@ fn mock_state_for_tick(
         sessions,
         active,
         recent: recent.into_iter().collect(),
+        cost,
     }
 }
 
@@ -545,6 +638,7 @@ fn simulated_active_request(
     if phase >= 3 {
         request.provider = Some(profile.provider.to_string());
         request.model = Some(profile.model.to_string());
+        request.usage_detail.resolved_model = Some(profile.model.to_string());
         request.effort = profile.effort.map(str::to_string);
     }
     if phase >= 10 {
@@ -594,6 +688,7 @@ fn simulated_completed_request(
     request.project = Some(profile.project.to_string());
     request.provider = Some(profile.provider.to_string());
     request.model = Some(profile.model.to_string());
+    request.usage_detail.resolved_model = Some(profile.model.to_string());
     request.effort = profile.effort.map(str::to_string);
     request.input_tokens = Some(1_800 + cycle.saturating_mul(137));
     if failed {
@@ -678,6 +773,7 @@ fn active_request(
         stream_chunks: 0,
         input_tokens: None,
         output_tokens: None,
+        usage_detail: UsageDetail::default(),
         error: None,
         traffic_capture_path: None,
     }
@@ -719,6 +815,7 @@ fn completed_request(
         stream_chunks: 0,
         input_tokens: None,
         output_tokens: None,
+        usage_detail: UsageDetail::default(),
         error: None,
         traffic_capture_path: None,
     }

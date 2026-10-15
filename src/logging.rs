@@ -11,7 +11,8 @@ pub const MAX_LOG_BYTES: u64 = 20 * 1024 * 1024;
 
 static STDERR_SUPPRESSION_DEPTH: AtomicUsize = AtomicUsize::new(0);
 
-pub const REDACT_KEYS: [&str; 15] = [
+pub const REDACT_KEYS: [&str; 16] = [
+    "x-claude-dual-capability",
     "authorization",
     "proxy-authorization",
     "access",

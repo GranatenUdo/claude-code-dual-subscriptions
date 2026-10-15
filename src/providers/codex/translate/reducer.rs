@@ -897,7 +897,7 @@ fn describe_open_blocks(
     out
 }
 
-fn parse_codex_usage(response: &serde_json::Value) -> CodexUsage {
+pub(crate) fn parse_codex_usage(response: &serde_json::Value) -> CodexUsage {
     let usage = match response.get("usage") {
         Some(u) => u,
         None => return CodexUsage::default(),

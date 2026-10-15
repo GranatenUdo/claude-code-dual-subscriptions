@@ -10,9 +10,23 @@ use super::ChatError;
 pub struct Usage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
+    /// Cached part of `prompt_tokens`; monitor-only, not sent to the client.
+    pub cached_tokens: u64,
 }
 
 impl Usage {
+    pub fn token_usage(&self) -> crate::monitor::TokenUsage {
+        crate::monitor::TokenUsage::from_openai(
+            Some(self.prompt_tokens),
+            Some(self.cached_tokens),
+            Some(self.completion_tokens),
+        )
+    }
+
+    pub fn is_reported(&self) -> bool {
+        self.prompt_tokens > 0 || self.completion_tokens > 0
+    }
+
     pub fn value(&self) -> Value {
         json!({
             "prompt_tokens": self.prompt_tokens,
@@ -115,6 +129,10 @@ impl CompletionState {
                 .get("output_tokens")
                 .and_then(Value::as_u64)
                 .unwrap_or(self.usage.completion_tokens);
+            self.usage.cached_tokens = usage
+                .pointer("/input_tokens_details/cached_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(self.usage.cached_tokens);
         }
     }
 }

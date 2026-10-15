@@ -57,9 +57,10 @@ export default defineConfig({
           label: 'Using the proxy',
           items: [
             { label: 'Configure Claude Code', slug: 'using/configure-claude-code' },
+            { label: 'Experimental Linux launcher', slug: 'using/experimental-launcher' },
             { label: 'Models and routing', slug: 'using/models-and-routing' },
             { label: 'Switching models and backends', slug: 'using/switching-models-and-backends' },
-            { label: 'Opus parent and Astra subagents', slug: 'using/subagents' },
+            { label: 'Astra and named Sol subagents', slug: 'using/subagents' },
             { label: 'Monitor TUI', slug: 'using/monitor-tui' },
             { label: 'For coding agents', slug: 'using/for-coding-agents' },
             { label: 'Troubleshooting', slug: 'using/troubleshooting' },

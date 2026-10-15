@@ -55,3 +55,149 @@ Inherited LRU advisories remain unresolved; see [DEPENDENCY-REVIEW.md](DEPENDENC
 The user reports a working Opus 5.5 parent and general-purpose Astra subagent after setting `CLAUDE_CODE_SUBAGENT_MODEL=gpt-6-astra[1m]` in project-local settings and restarting through the same proxy-enabled launcher. The pre-restart probe used Opus; the post-restart transcript recorded `gpt-6-astra`. No full-ID per-call model argument was used.
 
 This evidence does not verify the explicit Opus reviewer exception, million-token inference, all refresh/history paths, or a complete live regression/security review. The unresolved dependency advisories remain. This documentation update makes no provider calls or user-project settings changes.
+
+## Local Linux launcher candidate — 2026-10-14
+
+Branch `feature/linux-dual-launcher`, based on `9769c17`, an experimental
+candidate (not released or installed). The distinct `claude-code-dual` executable implements
+offline `doctor`, `contract`, and real `launch [--claude PATH] [--resume ID]`.
+Launch preserves ordinary project settings, hooks, permissions, MCP and child
+environment. Detected auth/model conflicts fail rather than being bypassed.
+
+Final local verification:
+
+- `cargo test --all --locked`: **1,150 passed, zero failures**, including nine
+  native Anthropic integration tests, five dual CLI tests and eight dual unit tests.
+- `cargo fmt --all -- --check`, strict all-target Clippy with `-D warnings`, and
+  `cargo build --all --locked`: passed.
+- Python installer/downloader tests: **16 passed**; fake-client PTY lifecycle tests: **4 passed**.
+- Actual Claude 2.1.299 in a bwrap network/filesystem namespace: **5 synthetic
+  scenarios passed** (saved OAuth/capability, Astra worker, Opus reviewer, resume,
+  safety hook and denied-tool policy). No real credentials or providers involved.
+- Docs: **25 pages built; 1,785 internal links/assets checked**.
+- Independent final source review: **no remaining blocking defect found** after
+  fixing redaction, installer locking/bounds, process-group cleanup, active request
+  cancellation, foreground ownership, signal codes and configuration conflicts.
+
+The initial real-client terminal marker failure was diagnosed as a harness issue
+(ANSI cursor positioning, zero PTY dimensions, render timing and an incorrect
+refusal exit-code assumption). All three corrected real-client terminal cases
+passed: direct trust refusal exits1, launcher trust refusal exits1, and launcher
+SIGTERM exits143. Normal trust gates were preserved. Full interactive
+conversation certification and Ctrl-Z/job-control remain unverified.
+Remote managed policy, intentionally daemonized descendants, live subscription
+acceptance/refresh, million-token capacity, broader fallback behavior and signed
+release distribution remain limitations/gates. There were no installations,
+user-settings changes, provider-secret reads, live calls, merges or releases.
+
+See [client evidence](docs/engineering/linux-client-evidence.md),
+[launcher guide](docs/src/content/docs/using/experimental-launcher.md) and
+[agent working rules](AGENTS.md). The workflow only prepares manual
+Linux candidate artifacts; it cannot publish a release. The staging utility
+supports exact-version downloads with an independent SHA-256, approved HTTPS
+redirects and a bounded worker covering DNS through final reads. The 16 tests
+include blocking-read termination and unchanged installation on failure. No real
+download was made. Published assets and authenticated digest/bootstrap
+distribution are absent; a supplied hash alone does not authenticate a publisher. Inherited
+LRU advisories are still documented separately in DEPENDENCY-REVIEW.md.
+
+Continuation verification on 2026-10-14 preserved the task checkout and
+used the existing task-local Rust 1.99 toolchain/cache. The locked offline Rust
+suite again passed **1,150 tests, zero failures**; formatting, strict all-target
+Clippy and the locked offline build passed. All **16 installer/downloader** and
+**four fake-client PTY** tests passed. The sandbox initially denied the PTY
+launcher's loopback listener; the approved rerun outside it passed with temporary
+homes and the fake client. Actual-Claude probes and the docs build were not rerun
+(Bun and docs dependencies are unavailable in this session). The implementation
+plan's stale checklist was reconciled with the existing client evidence; no source
+code, normal settings, installations or release state were changed.
+
+Documentation follow-up on 2026-10-14 records the user's report that named Sol
+agents work without changing the Astra environment default. The existing proxy
+recipe uses agent frontmatter `model: gpt-6.1-sol[1m]`, `effort: medium`, loaded
+through Claude Code's agent discovery and invoked without a per-call override.
+Exact `gpt-6.1-sol` is registered; bare `gpt-6.1` returns HTTP 400. Astra remains
+the general-purpose default. This is user-reported mixed-model success, not an
+independent live test or proof of 1M capacity. The experimental `claude-code-dual`
+candidate remains fixed to Astra and rejects Sol. This follow-up changes docs
+only, preserves candidate implementation work, and reads/edits no personal
+settings or agent files. No live calls, commits, pushes or publication were made.
+Documentation validation passed: `bun run build` generated 25 pages and
+`bun run check:links` checked 1,791 internal links/assets. Diff review and
+`git diff --check` passed; user-facing Aven/Grok references remain absent.
+No implementation tests were rerun for this docs-only follow-up.
+
+## Local certification and cost display — 2026-10-15
+
+Re-pinned to Claude Code **2.1.300** (pinned copy, sha256
+`674deba0bba9aee479f4503c438b49303b6fdd304b9a471b14977aaec5215453`) after the
+unchanged synthetic contract probe passed all five scenarios. WSL2 Ubuntu 26.04,
+x86_64, Rust 1.99.0, separate `CARGO_TARGET_DIR` and temporary `HOME`.
+
+- `cargo test --all --locked`: **1,190 passed, zero failures** (baseline 1,150).
+  Formatting, strict all-target Clippy (`-D warnings`) and the locked build passed.
+- Python: **16** installer/downloader tests and **11** PTY tests. The PTY tests run
+  the launcher as a job of an interactive bash and cover three Ctrl-Z/`fg` cycles,
+  `bg` completion with the shell keeping the terminal, `fg` after `bg`, `kill %1` of a suspended
+  job (143), SIGHUP (129), the orphaned process group case, and terminal modes
+  restored after a child killed in raw mode.
+- Docs: **25 pages built; 1,795 internal links/assets checked** (bun 1.3.13).
+- Actual-client certification matrix, `scripts/certify.py --client <pinned>`:
+  the real Claude 2.1.300 interface drives the production launcher preflight,
+  environment scoping, capability layer, router and supervisor, built as the
+  test-only harness `tests/dual_certification.rs` with both providers pointed at
+  in-process mocks. Each scenario runs in its own bwrap namespace without host
+  network, real home or credentials. All seven passed:
+  - **conversation:** two streaming turns, allowed Read, denied Bash with the
+    UserPromptSubmit safety hook (sentinel absent), a local stdio MCP tool, the
+    Astra worker over the Codex WebSocket path with synthetic Codex auth, the
+    explicit Opus reviewer, persisted session and `--resume` with history,
+    `/exit` 0, terminal restored, saved OAuth and OAuth beta on every request,
+    capability never upstream, no secret in terminal output;
+  - **terminal:** `/exit`, SIGTERM (143) and Ctrl-C mid-stream match a directly
+    started client, terminal modes restored, the interrupted stream is cancelled
+    upstream, background start refused;
+  - **suspend:** three Ctrl-Z/`fg` cycles through bash, launcher and client both
+    stopped, a turn answered after each `fg`, exit 0;
+  - **descendants:** SIGTERM mid-stream ends the owned process group and cancels
+    the active upstream request;
+  - **errors:** synthetic 401, 429, 500, interrupted stream and unsupported model
+    end in bounded API errors (10 client retries, about 3 minutes, for
+    429/5xx/interrupt), with no model or provider switch, and the session
+    recovers;
+  - **refusals / managed:** auth and model overrides, a project model setting and
+    `/etc/claude-code/managed-settings.json` are refused before any listener or
+    client starts.
+
+Defect found and fixed by the matrix: after SIGTERM the launcher killed Claude
+150 ms later, before it restored the terminal, leaving raw mode. The launcher now
+gives the child up to two seconds and restores the terminal modes saved at launch.
+
+An independent read-only source review of the branch then found, and this branch
+fixed: the certification harness could run outside its namespace under a
+`cargo test launch` filter and overwrite the real Codex credential file (it now
+requires the sandbox marker, `HOME=/home/test` and unguessable mode tokens, and
+`scripts/certify.py` checks that); concurrent supervisor unit tests competed for
+an interactive developer terminal (tests now run detached from it); `fg` after
+`bg` stopped the job again (the wrapper now hands the terminal back); missed poll
+ticks burst after a long suspension; termination handlers were installed only
+after the child started; owned-group cleanup returned before signalled members
+had exited; a reported standard speed did not override a fast request; responses
+without usage were shown as an exact $0.00; partially unreadable streams were
+shown as exact costs; the Claude fast-mode fallback covered more than the
+published Opus 4.6 case; and two certification checks could pass vacuously.
+
+Observed client behavior, identical without the launcher: Claude 2.1.300 runs
+Agent tool calls in the background and reports results in a later notification;
+its Bash tool detaches background jobs into their own session, so they survive
+exit (outside the launcher contract); and on an unsupported-model 404 it sends two
+non-streaming retries despite `CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1`. The
+certification accepts that last case only because the directly started client
+sends the same requests; there is no non-streaming request for 429, 5xx or
+interrupted streams.
+
+The monitor now shows the API-equivalent cost of native Claude and Codex traffic
+at hardcoded list prices (`src/pricing.rs`, prices as of 2026-10-14). Not
+certified: remote managed policy, live subscription acceptance and refresh,
+million-token capacity, other platforms and release distribution. No live calls,
+real credentials, installations, settings changes or releases were involved.

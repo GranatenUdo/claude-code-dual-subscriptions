@@ -16,6 +16,7 @@ pub const STATUS_WIDTH: u16 = 11;
 pub const RATE_WIDTH: u16 = 12;
 pub const DURATION_WIDTH: u16 = 8;
 pub const TOKEN_WIDTH: u16 = 7;
+pub const COST_WIDTH: u16 = 7;
 pub const ERROR_WIDTH: u16 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

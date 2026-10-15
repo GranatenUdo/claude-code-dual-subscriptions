@@ -1,8 +1,8 @@
 mod layout;
 
 use layout::{
-    CODE_WIDTH, COUNT_WIDTH, ColumnSpec, DURATION_WIDTH, EFFORT_WIDTH, ENDPOINT_WIDTH, ERROR_WIDTH,
-    ID_WIDTH, LayoutTier, MODEL_MEDIUM_WIDTH, MODEL_NARROW_WIDTH, MODEL_WIDE_WIDTH,
+    CODE_WIDTH, COST_WIDTH, COUNT_WIDTH, ColumnSpec, DURATION_WIDTH, EFFORT_WIDTH, ENDPOINT_WIDTH,
+    ERROR_WIDTH, ID_WIDTH, LayoutTier, MODEL_MEDIUM_WIDTH, MODEL_NARROW_WIDTH, MODEL_WIDE_WIDTH,
     PROJECT_MEDIUM_WIDTH, PROJECT_WIDE_WIDTH, PROVIDER_WIDTH, RATE_WIDTH, STATUS_WIDTH, TIME_WIDTH,
     TOKEN_WIDTH,
 };
@@ -32,7 +32,7 @@ use tokio::sync::oneshot;
 
 use crate::{
     monitor::{
-        MockMonitor, MonitorHandle, SESSION_TOKEN_BUCKET_SECS,
+        CostStatus, CostTotals, MockMonitor, MonitorHandle, RequestCost, SESSION_TOKEN_BUCKET_SECS,
         snapshot::{
             ActiveSnapshot, CompletedSnapshot, MonitorSnapshot, SessionSnapshot, SnapshotUpdate,
         },
@@ -524,7 +524,58 @@ fn render_header(
                 .add_modifier(Modifier::BOLD),
         ),
     ]);
+    let text = match state.cost.as_ref() {
+        Some(cost) => with_header_cost(text, cost, usize::from(area.width)),
+        None => text,
+    };
     frame.render_widget(Paragraph::new(text).style(Style::default().bg(TEAL)), area);
+}
+
+/// Appends the API-equivalent cost, shortening the label and then dropping
+/// the listen URL so the cost stays visible on narrow terminals.
+fn with_header_cost<'a>(mut line: Line<'a>, cost: &CostTotals, width: usize) -> Line<'a> {
+    let base = Style::default().fg(BG).bg(TEAL);
+    let amount = format!(
+        "{}{}",
+        if cost.estimated > 0 { "~" } else { "" },
+        format_cost_precise(cost.micros)
+    );
+    let missing = cost.unpriced.saturating_add(cost.unmetered);
+    let candidates = [
+        (
+            "  ≈API ",
+            (missing > 0).then(|| format!(" +{missing} unpriced")),
+        ),
+        ("  ≈", (missing > 0).then(|| format!(" +{missing}"))),
+    ];
+    let line_width = |line: &Line<'_>| {
+        line.spans
+            .iter()
+            .map(|span| span.content.chars().count())
+            .sum::<usize>()
+    };
+    for (index, (label, suffix)) in candidates.iter().enumerate() {
+        let extra = label.chars().count()
+            + amount.chars().count()
+            + suffix.as_deref().map_or(0, |suffix| suffix.chars().count());
+        let fits = line_width(&line) + extra <= width;
+        if fits || index + 1 == candidates.len() {
+            if !fits && line.spans.len() > 3 {
+                // Listen URL and its separator.
+                line.spans.drain(1..3);
+            }
+            line.spans.push(Span::styled(*label, base));
+            line.spans.push(Span::styled(
+                amount.clone(),
+                base.add_modifier(Modifier::BOLD),
+            ));
+            if let Some(suffix) = suffix {
+                line.spans.push(Span::styled(suffix.clone(), base));
+            }
+            break;
+        }
+    }
+    line
 }
 
 fn panel(title: &'static str, focused: bool) -> Block<'static> {
@@ -642,6 +693,120 @@ fn number_cell(value: impl Into<String>) -> Cell<'static> {
         Line::from(Span::styled(value.into(), Style::default().fg(DIM_WHITE)))
             .alignment(Alignment::Right),
     )
+}
+
+/// Compact cost for a 7-cell column: `$0.00`, `<$0.01`, `$12.3`, `$1.2k`.
+fn format_cost_compact(micros: u64) -> String {
+    let usd = micros as f64 / 1_000_000.0;
+    match micros {
+        0 => "$0.00".to_string(),
+        1..10_000 => "<$0.01".to_string(),
+        _ if usd < 9.995 => format!("${usd:.2}"),
+        _ if usd < 99.95 => format!("${usd:.1}"),
+        _ if usd < 999.5 => format!("${usd:.0}"),
+        _ if usd < 9_995.0 => format!("${:.1}k", usd / 1_000.0),
+        _ => format!("${:.0}k", usd / 1_000.0),
+    }
+}
+
+/// Cost with cent precision for the header and detail views.
+fn format_cost_precise(micros: u64) -> String {
+    let usd = micros as f64 / 1_000_000.0;
+    if micros > 0 && micros < 10_000 {
+        "<$0.01".to_string()
+    } else {
+        format!("${usd:.2}")
+    }
+}
+
+fn cost_cell(cost: Option<&RequestCost>) -> Cell<'static> {
+    let (text, color) = match cost {
+        None => ("-".to_string(), DIM),
+        Some(cost) => match (cost.status, cost.micros) {
+            (CostStatus::Priced, Some(micros)) => (
+                format!(
+                    "{}{}",
+                    if cost.estimated { "~" } else { "" },
+                    format_cost_compact(micros)
+                ),
+                YELLOW,
+            ),
+            (CostStatus::Unpriced, _) => ("n/a".to_string(), DIM),
+            (CostStatus::Unmetered, _) => ("?".to_string(), DIM),
+            _ => ("-".to_string(), DIM),
+        },
+    };
+    Cell::from(
+        Line::from(Span::styled(text, Style::default().fg(color))).alignment(Alignment::Right),
+    )
+}
+
+fn session_cost_cell(cost: Option<&CostTotals>) -> Cell<'static> {
+    // A session without priced traffic shows no amount rather than $0.00.
+    let cost = cost.filter(|cost| **cost != CostTotals::default());
+    let text = cost.map_or_else(
+        || "-".to_string(),
+        |cost| {
+            format!(
+                "{}{}{}",
+                if cost.estimated > 0 { "~" } else { "" },
+                format_cost_compact(cost.micros),
+                if cost.unpriced > 0 || cost.unmetered > 0 {
+                    "+"
+                } else {
+                    ""
+                }
+            )
+        },
+    );
+    Cell::from(
+        Line::from(Span::styled(text, Style::default().fg(YELLOW))).alignment(Alignment::Right),
+    )
+}
+
+fn request_cost_label(cost: Option<&RequestCost>) -> String {
+    let Some(cost) = cost else {
+        return "not priced (provider outside the price list)".to_string();
+    };
+    match (cost.status, cost.micros) {
+        (CostStatus::Priced, Some(micros)) => format!(
+            "{}{}",
+            format_cost_precise(micros),
+            if cost.estimated {
+                " (estimate: locally counted tokens)"
+            } else {
+                ""
+            }
+        ),
+        (CostStatus::Unpriced, _) => "unpriced (no published price)".to_string(),
+        (CostStatus::Unmetered, _) => "unmetered (response not observable)".to_string(),
+        _ => "pending".to_string(),
+    }
+}
+
+fn cost_totals_label(cost: &CostTotals) -> String {
+    let mut label = format_cost_precise(cost.micros);
+    if cost.estimated > 0 {
+        label.push_str(&format!(" ({} estimated)", cost.estimated));
+    }
+    let missing = cost.unpriced.saturating_add(cost.unmetered);
+    if missing > 0 {
+        label.push_str(&format!(" +{missing} unpriced"));
+    }
+    label
+}
+
+fn cost_by_model_label(cost: &CostTotals) -> String {
+    if cost.by_model.is_empty() {
+        return "-".to_string();
+    }
+    let mut models = cost.by_model.iter().collect::<Vec<_>>();
+    models.sort_by(|left, right| right.1.cmp(left.1).then_with(|| left.0.cmp(right.0)));
+    models
+        .into_iter()
+        .map(|(model, micros)| format!("{model} {}", format_cost_precise(*micros)))
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 fn status_cell(value: &str) -> Cell<'static> {
@@ -835,6 +1000,7 @@ enum SessionColumn {
     Effort,
     Input,
     Output,
+    Cost,
     Rate,
     Activity,
     Status,
@@ -855,11 +1021,27 @@ fn session_columns(tier: LayoutTier, show_full_sparkline: bool) -> Vec<ColumnSpe
             ColumnSpec::fixed(C::Effort, "Effort", Alignment::Left, EFFORT_WIDTH),
             ColumnSpec::fixed(C::Input, "In", Alignment::Right, TOKEN_WIDTH),
             ColumnSpec::fixed(C::Output, "Out", Alignment::Right, TOKEN_WIDTH),
+            ColumnSpec::fixed(C::Cost, "Cost", Alignment::Right, COST_WIDTH),
             ColumnSpec::fixed(C::Rate, "Rate", Alignment::Right, RATE_WIDTH),
             ColumnSpec::flex(C::Activity, "Tokens/10s · 4k", Alignment::Left, 1),
             ColumnSpec::fixed(C::Status, "Status", Alignment::Left, STATUS_WIDTH),
         ],
-        (LayoutTier::Expanded | LayoutTier::Wide, _) => vec![
+        (LayoutTier::Wide, false) => vec![
+            ColumnSpec::fixed(C::Marker, "", Alignment::Left, 1),
+            ColumnSpec::fixed(C::Id, "ID", Alignment::Left, ID_WIDTH),
+            ColumnSpec::fixed(C::Project, "Project", Alignment::Left, PROJECT_MEDIUM_WIDTH),
+            ColumnSpec::fixed(C::Counts, "A/R/F", Alignment::Right, 7),
+            ColumnSpec::fixed(C::Provider, "Provider", Alignment::Left, PROVIDER_WIDTH),
+            ColumnSpec::fixed(C::Model, "Model", Alignment::Left, MODEL_NARROW_WIDTH),
+            ColumnSpec::fixed(C::Effort, "Effort", Alignment::Left, EFFORT_WIDTH),
+            ColumnSpec::fixed(C::Input, "In", Alignment::Right, TOKEN_WIDTH),
+            ColumnSpec::fixed(C::Output, "Out", Alignment::Right, TOKEN_WIDTH),
+            ColumnSpec::fixed(C::Cost, "Cost", Alignment::Right, COST_WIDTH),
+            ColumnSpec::fixed(C::Rate, "Rate", Alignment::Right, RATE_WIDTH),
+            ColumnSpec::flex(C::Activity, "Tokens/10s", Alignment::Left, 1),
+            ColumnSpec::fixed(C::Status, "Status", Alignment::Left, STATUS_WIDTH),
+        ],
+        (LayoutTier::Expanded, _) => vec![
             ColumnSpec::fixed(C::Marker, "", Alignment::Left, 1),
             ColumnSpec::fixed(C::Id, "ID", Alignment::Left, ID_WIDTH),
             ColumnSpec::fixed(C::Project, "Project", Alignment::Left, PROJECT_MEDIUM_WIDTH),
@@ -956,6 +1138,7 @@ fn render_sessions(
                     SessionColumn::Effort => text_cell(session.effort.as_deref().unwrap_or("-")),
                     SessionColumn::Input => number_cell(compact_tokens(session.input_tokens)),
                     SessionColumn::Output => number_cell(compact_tokens(session.output_tokens)),
+                    SessionColumn::Cost => session_cost_cell(session.cost.as_ref()),
                     SessionColumn::Rate => rate_cell(session.rate().label()),
                     SessionColumn::Activity => Cell::from(token_sparkline_line(
                         &session.output_token_samples,
@@ -1126,8 +1309,20 @@ enum RecentColumn {
     Rate,
     Input,
     Output,
+    Cost,
     Details,
     Error,
+}
+
+/// The Wide recent schema needs room for its Cost column and at least eight
+/// cells of Details; narrower Wide terminals use the Expanded schema.
+const RECENT_WIDE_MIN_WIDTH: u16 = 162;
+
+fn recent_tier(width: u16) -> LayoutTier {
+    match LayoutTier::for_outer_width(width) {
+        LayoutTier::Wide if width < RECENT_WIDE_MIN_WIDTH => LayoutTier::Expanded,
+        tier => tier,
+    }
 }
 
 fn recent_columns(tier: LayoutTier) -> Vec<ColumnSpec<RecentColumn>> {
@@ -1146,6 +1341,7 @@ fn recent_columns(tier: LayoutTier) -> Vec<ColumnSpec<RecentColumn>> {
             ColumnSpec::fixed(C::Rate, "Rate", Alignment::Right, RATE_WIDTH),
             ColumnSpec::fixed(C::Input, "In", Alignment::Right, TOKEN_WIDTH),
             ColumnSpec::fixed(C::Output, "Out", Alignment::Right, TOKEN_WIDTH),
+            ColumnSpec::fixed(C::Cost, "Cost", Alignment::Right, COST_WIDTH),
             ColumnSpec::flex(C::Details, "Details", Alignment::Left, 1),
         ],
         LayoutTier::Expanded => vec![
@@ -1160,6 +1356,7 @@ fn recent_columns(tier: LayoutTier) -> Vec<ColumnSpec<RecentColumn>> {
             ColumnSpec::fixed(C::Rate, "Rate", Alignment::Right, RATE_WIDTH),
             ColumnSpec::fixed(C::Input, "In", Alignment::Right, TOKEN_WIDTH),
             ColumnSpec::fixed(C::Output, "Out", Alignment::Right, TOKEN_WIDTH),
+            ColumnSpec::fixed(C::Cost, "Cost", Alignment::Right, COST_WIDTH),
             ColumnSpec::fixed(C::Error, "!", Alignment::Right, ERROR_WIDTH),
         ],
         LayoutTier::Medium => vec![
@@ -1225,7 +1422,7 @@ fn render_recent(
         return;
     }
 
-    let columns = recent_columns(LayoutTier::for_outer_width(area.width));
+    let columns = recent_columns(recent_tier(area.width));
     let widths = column_constraints(&columns);
     let rows = recent.iter().enumerate().map(|(index, request)| {
         let cells = columns
@@ -1253,6 +1450,7 @@ fn render_recent(
                     RecentColumn::Rate => rate_cell(request.rate().label()),
                     RecentColumn::Input => number_cell(token_value(request.input_tokens)),
                     RecentColumn::Output => number_cell(token_value(request.output_tokens)),
+                    RecentColumn::Cost => cost_cell(request.cost.as_ref()),
                     RecentColumn::Details => detail_cell(request.error.as_deref().unwrap_or("")),
                     RecentColumn::Error => detail_cell(error_indicator(request)),
                 }
@@ -1416,6 +1614,22 @@ fn render_session_detail(
             ),
             detail_line("rate", session.rate().label(), TEAL),
             detail_line(
+                "api cost",
+                session
+                    .cost
+                    .as_ref()
+                    .map_or_else(|| "-".to_string(), cost_totals_label),
+                YELLOW,
+            ),
+            detail_line(
+                "cost by model",
+                session
+                    .cost
+                    .as_ref()
+                    .map_or_else(|| "-".to_string(), cost_by_model_label),
+                DIM_WHITE,
+            ),
+            detail_line(
                 "last status",
                 session.last_status.as_str(),
                 status_color(&session.last_status),
@@ -1506,6 +1720,33 @@ fn render_request_detail(
             lines.push(detail_line(
                 "capture",
                 path.to_string_lossy().into_owned(),
+                DIM_WHITE,
+            ));
+        }
+        lines.push(detail_line(
+            "cache tokens",
+            format!(
+                "read {} · write {} 5m / {} 1h",
+                token_value(request.cache_read_tokens),
+                token_value(request.cache_write_5m_tokens),
+                token_value(request.cache_write_1h_tokens)
+            ),
+            DIM_WHITE,
+        ));
+        lines.push(detail_line(
+            "api cost",
+            request_cost_label(request.cost.as_ref()),
+            YELLOW,
+        ));
+        if let Some(cost) = &request.cost {
+            lines.push(detail_line(
+                "priced as",
+                format!(
+                    "{} · {} · prices as of {}",
+                    cost.model.as_deref().unwrap_or("-"),
+                    cost.tier.label(),
+                    state.prices_as_of.as_deref().unwrap_or("-")
+                ),
                 DIM_WHITE,
             ));
         }
@@ -1667,6 +1908,7 @@ fn render_help_overlay(frame: &mut ratatui::Frame<'_>, area: Rect, attached: boo
         ("Tab", "switch pane"),
         ("Enter", "open detail"),
         ("Esc", "close overlay / detail"),
+        ("Cost", "API list-price equivalent"),
     ];
     let content = lines
         .into_iter()
@@ -1966,7 +2208,10 @@ mod tests {
         assert!(fixed_budget(&recent_columns(LayoutTier::Narrow)) <= 76);
         assert!(fixed_budget(&recent_columns(LayoutTier::Medium)) <= 88);
         assert!(fixed_budget(&recent_columns(LayoutTier::Expanded)) <= 118);
-        assert!(fixed_budget(&recent_columns(LayoutTier::Wide)) <= 152);
+        // Wide recent is used from RECENT_WIDE_MIN_WIDTH; Details keeps 8 cells.
+        assert!(fixed_budget(&recent_columns(LayoutTier::Wide)) + 8 <= RECENT_WIDE_MIN_WIDTH - 2);
+        assert_eq!(recent_tier(RECENT_WIDE_MIN_WIDTH - 1), LayoutTier::Expanded);
+        assert_eq!(recent_tier(RECENT_WIDE_MIN_WIDTH), LayoutTier::Wide);
 
         assert!(fixed_budget(&event_columns(LayoutTier::Emergency)) <= 75);
         assert!(fixed_budget(&event_columns(LayoutTier::Narrow)) <= 76);
@@ -2815,5 +3060,166 @@ mod tests {
         app.move_up(2, 3, false);
         assert_eq!(app.focus, FocusPane::Recent);
         assert_eq!(app.recent_selected, 0);
+    }
+
+    fn mock_app(listen_url: &str) -> MonitorApp {
+        MonitorApp {
+            listen_url: listen_url.to_string(),
+            setup_text: String::new(),
+            show_setup: false,
+            show_help: false,
+            detail: None,
+            focus: FocusPane::Sessions,
+            selected: 0,
+            recent_selected: 0,
+            tick: 0,
+            phase: MonitorPhase::Running,
+            shutdown: None,
+            shutdown_complete: None,
+        }
+    }
+
+    #[test]
+    fn header_keeps_the_cost_visible_from_wide_to_narrow_terminals() {
+        let state: MonitorSnapshot = mock_state().into();
+        let app = mock_app("http://127.0.0.1:18765");
+        let total = format_cost_precise(state.cost.as_ref().unwrap().micros);
+        for width in [180, 130, 100, 78] {
+            let header = buffer_text(&draw(width, 1, |frame| {
+                render_header(frame, frame.area(), &app, &state)
+            }));
+            assert!(header.contains(&total), "width {width}: {header}");
+            assert!(header.contains('≈'), "width {width}: {header}");
+        }
+        let wide = buffer_text(&draw(180, 1, |frame| {
+            render_header(frame, frame.area(), &app, &state)
+        }));
+        assert!(wide.contains("≈API"), "{wide}");
+        assert!(wide.contains("http://127.0.0.1:18765"), "{wide}");
+    }
+
+    #[test]
+    fn cost_columns_render_at_wide_and_expanded_widths() {
+        let state: MonitorSnapshot = mock_state().into();
+        for width in [180, 130] {
+            let mut app = mock_app("mock://tui-demo");
+            let text = buffer_text(&draw(width, 48, |frame| render(frame, &mut app, &state)));
+            assert!(text.contains("Cost"), "width {width}: {text}");
+            assert!(text.contains("$0."), "width {width}: {text}");
+        }
+        // Medium keeps its existing columns; cost stays in the detail views.
+        let mut app = mock_app("mock://tui-demo");
+        let medium = buffer_text(&draw(100, 48, |frame| render(frame, &mut app, &state)));
+        assert!(!medium.contains("Cost"), "{medium}");
+    }
+
+    #[test]
+    fn detail_views_break_cost_down_by_model_and_token_kind() {
+        let state: MonitorSnapshot = mock_state().into();
+        let session = state
+            .sessions
+            .iter()
+            .position(|session| {
+                session.session_id.as_deref() == Some("57c7c914-ada4-4f40-9672-985f950fbb66")
+            })
+            .unwrap();
+        let text = buffer_text(&draw(160, 24, |frame| {
+            render_session_detail(frame, frame.area(), &state, session)
+        }));
+        assert!(text.contains("api cost"), "{text}");
+        assert!(text.contains("claude-opus-5-5 $0.10"), "{text}");
+        assert!(text.contains("gpt-6-astra $0.35"), "{text}");
+
+        let request = state
+            .recent
+            .iter()
+            .position(|request| request.request_id == "req-complete-claude")
+            .unwrap();
+        let text = buffer_text(&draw(160, 30, |frame| {
+            render_request_detail(frame, frame.area(), &state, request)
+        }));
+        assert!(text.contains("read 184.5k"), "{text}");
+        assert!(text.contains("write 6.2k 5m"), "{text}");
+        assert!(text.contains("$0.10"), "{text}");
+        assert!(
+            text.contains("claude-opus-5-5 · standard · prices as of 2026-10-14"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn help_overlay_explains_cost_without_truncation() {
+        let text = buffer_text(&draw(80, 24, |frame| {
+            render_help_overlay(frame, frame.area(), false)
+        }));
+        assert!(text.contains("API list-price equivalent"), "{text}");
+    }
+
+    #[test]
+    fn cost_columns_respect_flexible_column_minimums() {
+        let flex_width = |budget: u16, inner: u16| inner.saturating_sub(budget);
+        // Sessions: the activity column keeps at least eight cells.
+        assert!(
+            flex_width(
+                fixed_budget(&session_columns(LayoutTier::Expanded, false)),
+                118
+            ) >= 8
+        );
+        assert!(flex_width(fixed_budget(&session_columns(LayoutTier::Wide, false)), 152) >= 8);
+        assert!(flex_width(fixed_budget(&session_columns(LayoutTier::Wide, true)), 168) >= 8);
+        // Recent: flexible Model keeps 18 cells, Details keeps 8.
+        assert!(flex_width(fixed_budget(&recent_columns(LayoutTier::Expanded)), 118) >= 18);
+        assert!(
+            flex_width(
+                fixed_budget(&recent_columns(LayoutTier::Wide)),
+                RECENT_WIDE_MIN_WIDTH - 2
+            ) >= 8
+        );
+    }
+
+    #[test]
+    fn cost_cells_cover_every_status() {
+        let cost = |status, micros, estimated| RequestCost {
+            status,
+            micros,
+            estimated,
+            model: None,
+            tier: crate::pricing::PriceTier::Standard,
+        };
+        let text = |cell_cost: Option<RequestCost>| {
+            buffer_text(&draw(8, 1, |frame| {
+                let table = Table::new(
+                    [Row::new([cost_cell(cell_cost.as_ref())])],
+                    [Constraint::Length(7)],
+                );
+                frame.render_widget(table, frame.area());
+            }))
+        };
+        assert!(text(None).contains('-'));
+        assert!(text(Some(cost(CostStatus::Priced, Some(1_234_567), false))).contains("$1.23"));
+        assert!(text(Some(cost(CostStatus::Priced, Some(12_340_000), true))).contains("~$12.3"));
+        assert!(text(Some(cost(CostStatus::Priced, Some(5), false))).contains("<$0.01"));
+        assert!(text(Some(cost(CostStatus::Unpriced, None, false))).contains("n/a"));
+        assert!(text(Some(cost(CostStatus::Unmetered, None, false))).contains('?'));
+        assert_eq!(format_cost_compact(1_234_000_000), "$1.2k");
+        assert_eq!(format_cost_compact(250_000_000), "$250");
+        assert_eq!(format_cost_compact(12_345_000_000), "$12k");
+    }
+
+    #[test]
+    fn legacy_snapshot_without_cost_renders_no_cost_figures() {
+        let mut state: MonitorSnapshot = mock_state().into();
+        state.cost = None;
+        state.prices_as_of = None;
+        for session in &mut state.sessions {
+            session.cost = None;
+        }
+        for request in &mut state.recent {
+            request.cost = None;
+        }
+        let mut app = mock_app("mock://tui-demo");
+        let text = buffer_text(&draw(180, 48, |frame| render(frame, &mut app, &state)));
+        assert!(!text.contains("≈API"), "{text}");
+        assert!(!text.contains("$0."), "{text}");
     }
 }

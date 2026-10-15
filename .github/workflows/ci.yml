@@ -22,3 +22,26 @@ jobs:
         run: cargo install checkle just --locked
       - name: Run full checks
         run: just check-ci
+      - name: Launcher installer and terminal tests
+        run: |
+          cargo build --locked --bin claude-code-dual
+          python3 -m unittest tests/test_dual_installer.py tests/test_dual_tty.py
+
+  # The release workflow builds Linux candidates only, so compile the
+  # library and binaries on the other platforms the upstream project supports.
+  cross-platform:
+    name: Compile check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check library and binaries
+        run: cargo check --locked --lib --bins
+      - name: Check all targets (informational)
+        continue-on-error: true
+        run: cargo check --locked --all-targets

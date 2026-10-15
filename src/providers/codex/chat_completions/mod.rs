@@ -44,6 +44,13 @@ impl ChatCompletionsBackend {
     pub async fn handle(&self, request: TranslatedRequest, ctx: RequestContext) -> Response {
         if let Some(monitor) = ctx.monitor.as_ref() {
             monitor.model_resolved(&ctx.req_id, &request.model);
+            monitor.pricing_resolved(
+                &ctx.req_id,
+                &request.model,
+                crate::pricing::PriceTier::from_wire(
+                    request.upstream.get("service_tier").and_then(Value::as_str),
+                ),
+            );
             monitor.upstream_started(&ctx.req_id);
         }
         let upstream = match self
@@ -81,14 +88,11 @@ impl ChatCompletionsBackend {
             Ok(completion) => completion,
             Err(error) => return error.response(),
         };
-        if let Some(usage) = completion.get("usage")
-            && let Some(monitor) = ctx.monitor.as_ref()
+        // Without upstream usage the response's zero counts are not usage.
+        if let Some(monitor) = ctx.monitor.as_ref()
+            && let Some(usage) = crate::providers::codex::reported_upstream_usage(&bytes)
         {
-            monitor.usage_updated(
-                &ctx.req_id,
-                usage.get("prompt_tokens").and_then(Value::as_u64),
-                usage.get("completion_tokens").and_then(Value::as_u64),
-            );
+            monitor.usage_final(&ctx.req_id, crate::providers::codex::token_usage(&usage));
         }
         if let Some(traffic) = ctx.traffic.as_deref() {
             traffic.write_json("050-openai-chat-completion-response", &completion);
@@ -412,6 +416,80 @@ mod tests {
         let snapshot = monitor.snapshot();
         assert_eq!(snapshot.active[0].input_tokens, Some(8));
         assert_eq!(snapshot.active[0].output_tokens, Some(4));
+    }
+
+    async fn cached_usage_snapshot(
+        sse: &'static [u8],
+        stream: bool,
+    ) -> (Value, crate::monitor::MonitorState) {
+        let (backend, server) = mock_backend(sse).await;
+        let mut body = json!({
+            "model":"gpt-5.6-sol-fast",
+            "stream": stream,
+            "messages":[{"role":"user","content":"answer"}]
+        });
+        if stream {
+            body["stream_options"] = json!({"include_usage": true});
+        }
+        let request = request::translate_request(body).unwrap();
+        let monitor = MonitorHandle::new(10);
+        let ctx = context(monitor.clone());
+        monitor.provider_selected("chat-test", "codex", "gpt-5.6-sol-fast", None);
+        let response = backend.handle(request, ctx).await;
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        server.await.unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        let usage = if stream {
+            text.lines()
+                .filter_map(|line| line.strip_prefix("data: "))
+                .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+                .find_map(|chunk| chunk.get("usage").cloned())
+                .unwrap()
+        } else {
+            serde_json::from_slice::<Value>(&bytes).unwrap()["usage"].clone()
+        };
+        (usage, monitor.snapshot())
+    }
+
+    const CACHED_SSE: &[u8] = b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"yes\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_cached\",\"model\":\"gpt-5.6-sol\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1000,\"input_tokens_details\":{\"cached_tokens\":800},\"output_tokens\":50}}}\n\n";
+
+    #[tokio::test]
+    async fn cached_prompt_tokens_are_priced_as_cache_reads_without_changing_the_client() {
+        for stream in [false, true] {
+            let (usage, state) = cached_usage_snapshot(CACHED_SSE, stream).await;
+            // The client keeps OpenAI semantics: prompt tokens include cached ones.
+            assert_eq!(usage["prompt_tokens"], 1000, "stream={stream}");
+            assert_eq!(usage["total_tokens"], 1050, "stream={stream}");
+            let request = state.active.first().map_or_else(
+                || {
+                    let completed = &state.recent[0];
+                    (
+                        completed.input_tokens,
+                        completed.usage_detail.cache_read_tokens,
+                        completed.usage_detail.cost.clone(),
+                    )
+                },
+                |active| {
+                    (
+                        active.input_tokens,
+                        active.usage_detail.cache_read_tokens,
+                        active.usage_detail.cost.clone(),
+                    )
+                },
+            );
+            assert_eq!(request.0, Some(200), "stream={stream}");
+            assert_eq!(request.1, Some(800), "stream={stream}");
+            let cost = request.2.unwrap();
+            // gpt-5.6-sol fast: 200 x $8 + 800 x $0.80 + 50 x $40 per MTok.
+            assert_eq!(
+                cost.tier,
+                crate::pricing::PriceTier::Fast,
+                "stream={stream}"
+            );
+            assert_eq!(cost.micros, Some(1_600 + 640 + 2_000), "stream={stream}");
+        }
     }
 
     #[tokio::test]

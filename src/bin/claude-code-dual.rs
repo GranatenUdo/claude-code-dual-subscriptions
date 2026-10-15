@@ -21,7 +21,7 @@ enum Command {
     },
     /// Show the fixed session model contract and validation status.
     Contract,
-    /// Start an owned loopback listener and a scoped Claude 2.1.299 session.
+    /// Start an owned loopback listener and a scoped session on the pinned Claude Code version.
     Launch {
         #[arg(long)]
         claude: Option<std::path::PathBuf>,

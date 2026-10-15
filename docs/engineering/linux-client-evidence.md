@@ -43,6 +43,15 @@ Observed successful checks:
   a settings-denied Bash tool was unavailable and its sentinel was not created.
   The hook sentinel existed. No safety bypass or real configuration was involved.
 
+Re-pin to 2.1.300 (2026-10-15): the same `probe-claude-contract.py all` command,
+run against a pinned copy of `~/.local/share/claude/versions/2.1.300` (sha256
+`674deba0bba9aee479f4503c438b49303b6fdd304b9a471b14977aaec5215453`) with
+`--setenv DISABLE_AUTOUPDATER 1`, passed all five scenarios with the same
+observations as above: saved OAuth, OAuth beta and capability on every request;
+Astra worker with the 1M hint; explicit Opus reviewer; resumed history; safety
+hook ran and the denied Bash sentinel was absent; no secret in output. The
+launcher contract was changed only after this passed.
+
 Early subagent attempts triggered Claude's auto-mode classifier and did not prove
 worker routing. The final synthetic Agent scenarios explicitly allow only Agent
 in `dontAsk` mode. These testing flags are not production launcher flags.

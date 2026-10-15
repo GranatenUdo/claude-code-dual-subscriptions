@@ -23,7 +23,7 @@ fn launch_runs_scoped_fake_client_and_propagates_exit() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let client = dir.path().join("claude");
-    std::fs::write(&client, "#!/bin/sh\nif [ \"$1\" = --version ]; then echo '2.1.299 (Claude Code)'; exit 0; fi\n[ \"$CLAUDE_CODE_SUBAGENT_MODEL\" = 'gpt-6-astra[1m]' ] || exit 80\n[ -z \"${ANTHROPIC_AUTH_TOKEN+x}\" ] || exit 81\n[ -z \"${CLAUDE_CODE_SUBAGENT_MODEL_FORCE+x}\" ] || exit 82\n[ -n \"$ANTHROPIC_CUSTOM_HEADERS\" ] || exit 83\n[ \"$1\" = --model ] || exit 84\nprintf '%s' \"$ANTHROPIC_BASE_URL\" > endpoint\nexit 23\n").unwrap();
+    std::fs::write(&client, "#!/bin/sh\nif [ \"$1\" = --version ]; then echo '2.1.300 (Claude Code)'; exit 0; fi\n[ \"$CLAUDE_CODE_SUBAGENT_MODEL\" = 'gpt-6-astra[1m]' ] || exit 80\n[ -z \"${ANTHROPIC_AUTH_TOKEN+x}\" ] || exit 81\n[ -z \"${CLAUDE_CODE_SUBAGENT_MODEL_FORCE+x}\" ] || exit 82\n[ -n \"$ANTHROPIC_CUSTOM_HEADERS\" ] || exit 83\n[ \"$1\" = --model ] || exit 84\nprintf '%s' \"$ANTHROPIC_BASE_URL\" > endpoint\nexit 23\n").unwrap();
     std::fs::set_permissions(&client, std::fs::Permissions::from_mode(0o700)).unwrap();
     let result = Command::cargo_bin("claude-code-dual")
         .unwrap()
@@ -45,6 +45,35 @@ fn launch_runs_scoped_fake_client_and_propagates_exit() {
     assert!(endpoint.starts_with("http://127.0.0.1:"));
     assert!(std::net::TcpStream::connect(endpoint.trim_start_matches("http://")).is_err());
     assert!(!String::from_utf8_lossy(&result.stderr).contains("x-claude-dual-capability:"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn previous_client_version_is_refused_before_listener_start() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let client = dir.path().join("claude");
+    std::fs::write(
+        &client,
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo '2.1.299 (Claude Code)'; exit 0; fi\ntouch executed\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&client, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let result = Command::cargo_bin("claude-code-dual")
+        .unwrap()
+        .env_clear()
+        .env("HOME", dir.path())
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(dir.path())
+        .args(["launch", "--claude"])
+        .arg(&client)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(!dir.path().join("executed").exists());
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("not validated 2.1.300"), "{stderr}");
+    assert!(stderr.contains("no listener was started"), "{stderr}");
 }
 
 #[cfg(target_os = "linux")]

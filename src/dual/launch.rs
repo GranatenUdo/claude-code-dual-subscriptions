@@ -140,8 +140,10 @@ pub unsafe fn run(client: Option<PathBuf>, resume: Option<String>) -> anyhow::Re
         .take(512)
         .read_to_end(&mut version)?;
     anyhow::ensure!(
-        status.unwrap() == 0 && version == b"2.1.299 (Claude Code)\n",
-        "Claude version is not validated 2.1.299; output redacted; no listener was started"
+        status.unwrap() == 0
+            && version == format!("{} (Claude Code)\n", super::CLIENT_VERSION).as_bytes(),
+        "Claude version is not validated {}; output redacted; no listener was started",
+        super::CLIENT_VERSION
     );
     // This entry point is called from the synchronous binary before any runtime
     // or thread exists. Remove inherited provider endpoints, proxies, logging,
@@ -170,24 +172,61 @@ pub unsafe fn run(client: Option<PathBuf>, resume: Option<String>) -> anyhow::Re
         None,
         crate::server::AppFeatures::default(),
     );
+    let hangup_ignored = sighup_ignored();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     eprintln!(
         "claude-code-dual: parent Opus 5.5, default worker Astra [1m]; normal project hooks, permissions and MCP retained. Remote policy and upstream capacity remain unverified."
     );
-    runtime.block_on(super::session::supervise(&spec, router, async {
-        #[cfg(unix)]
-        {
-            let mut term =
-                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                    .expect("SIGTERM handler");
-            tokio::select! { _ = tokio::signal::ctrl_c() => 130, _ = term.recv() => 143 }
+    runtime.block_on(super::session::supervise(
+        &spec,
+        router,
+        stop_signals(hangup_ignored),
+    ))
+}
+
+/// Whether SIGHUP was ignored when the launcher started, as under `nohup`;
+/// then no hangup handler is installed.
+fn sighup_ignored() -> bool {
+    #[cfg(unix)]
+    unsafe {
+        let mut action: libc::sigaction = std::mem::zeroed();
+        libc::sigaction(libc::SIGHUP, std::ptr::null(), &mut action) == 0
+            && action.sa_sigaction == libc::SIG_IGN
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+/// Resolves with the conventional exit code of the first termination signal.
+async fn stop_signals(hangup_ignored: bool) -> i32 {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let mut term = signal(SignalKind::terminate()).expect("SIGTERM handler");
+        let mut hangup =
+            (!hangup_ignored).then(|| signal(SignalKind::hangup()).expect("SIGHUP handler"));
+        let hangup = async {
+            match hangup.as_mut() {
+                Some(hangup) => {
+                    hangup.recv().await;
+                }
+                None => std::future::pending::<()>().await,
+            }
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => 130,
+            _ = term.recv() => 143,
+            _ = hangup => 129,
         }
-        #[cfg(not(unix))]
-        {
-            let _ = tokio::signal::ctrl_c().await;
-            130
-        }
-    }))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = hangup_ignored;
+        let _ = tokio::signal::ctrl_c().await;
+        130
+    }
 }

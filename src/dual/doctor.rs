@@ -103,7 +103,7 @@ pub fn inspect_settings(path: &Path, scope: &str) -> Vec<Finding> {
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(0o400000 | 0o4000); // O_NOFOLLOW | O_NONBLOCK
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     let Ok(file) = options.open(path) else {
         return vec![finding(scope, "unknown", "settings unreadable")];

@@ -148,7 +148,9 @@ pub async fn supervise(
             unsafe {
                 // Only the process group created for this child. Descendants
                 // that intentionally daemonize are outside the session contract.
+                // SIGCONT lets a suspended group act on the termination request.
                 libc::kill(-(self.0.id() as i32), libc::SIGTERM);
+                libc::kill(-(self.0.id() as i32), libc::SIGCONT);
                 std::thread::sleep(std::time::Duration::from_millis(150));
                 libc::kill(-(self.0.id() as i32), libc::SIGKILL);
             }
@@ -165,6 +167,11 @@ pub async fn supervise(
             code = &mut stop => return Ok(code),
             _ = poll.tick() => {
                 if let Some(code) = peek_exit_code(&mut child.0)? { return Ok(code); }
+                #[cfg(target_os = "linux")]
+                if job_control::child_stopped(&child.0)? {
+                    // Blocks while this job is suspended; the shell resumes it.
+                    job_control::follow_child_stop(child.0.id() as i32);
+                }
                 anyhow::ensure!(!server.1.as_ref().unwrap().is_finished(), "local listener stopped; child terminated");
             }
         }
@@ -216,19 +223,37 @@ fn exit_code(status: std::process::ExitStatus) -> i32 {
     }
 }
 
-struct TerminalGuard(Option<i32>);
+/// Runs `f` with SIGTTOU blocked on the calling thread only, so a terminal
+/// ownership change from a background group neither stops the process nor
+/// affects the server runtime's threads.
+#[cfg(unix)]
+fn with_sigttou_blocked<T>(f: impl FnOnce() -> T) -> T {
+    unsafe {
+        let mut block: libc::sigset_t = std::mem::zeroed();
+        let mut previous: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut block);
+        libc::sigaddset(&mut block, libc::SIGTTOU);
+        libc::pthread_sigmask(libc::SIG_BLOCK, &block, &mut previous);
+        let result = f();
+        libc::pthread_sigmask(libc::SIG_SETMASK, &previous, std::ptr::null_mut());
+        result
+    }
+}
+
+/// Gives the child's group the terminal and returns it on exit, but only while
+/// the child still owns it: after `bg` the shell's group must keep it.
+struct TerminalGuard(Option<(i32, i32)>);
 impl TerminalGuard {
     fn foreground(child: u32) -> Self {
         #[cfg(unix)]
         unsafe {
             let previous = libc::tcgetpgrp(libc::STDIN_FILENO);
             if previous >= 0 {
-                let old = libc::signal(libc::SIGTTOU, libc::SIG_IGN);
-                let result = libc::tcsetpgrp(libc::STDIN_FILENO, child as i32);
-                libc::signal(libc::SIGTTOU, old);
+                let result =
+                    with_sigttou_blocked(|| libc::tcsetpgrp(libc::STDIN_FILENO, child as i32));
                 if result == 0 {
                     libc::kill(-(child as i32), libc::SIGCONT);
-                    return Self(Some(previous));
+                    return Self(Some((previous, child as i32)));
                 }
             }
         }
@@ -239,12 +264,71 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         #[cfg(unix)]
-        if let Some(previous) = self.0 {
+        if let Some((previous, child)) = self.0 {
             unsafe {
-                let old = libc::signal(libc::SIGTTOU, libc::SIG_IGN);
-                libc::tcsetpgrp(libc::STDIN_FILENO, previous);
-                libc::signal(libc::SIGTTOU, old);
+                if libc::tcgetpgrp(libc::STDIN_FILENO) == child {
+                    with_sigttou_blocked(|| libc::tcsetpgrp(libc::STDIN_FILENO, previous));
+                }
             }
+        }
+    }
+}
+
+/// Mirrors the child's job state, so Ctrl-Z, `fg` and `bg` behave as they do
+/// for a directly launched Claude: the child stops on its own group's
+/// terminal signal, then the wrapper returns the terminal and stops its job.
+#[cfg(target_os = "linux")]
+mod job_control {
+    use super::with_sigttou_blocked;
+
+    /// Consumes one stop notification without reaping: no `WEXITED` and no
+    /// `WNOWAIT`, so exit status stays available to `peek_exit_code`.
+    pub(super) fn child_stopped(child: &std::process::Child) -> std::io::Result<bool> {
+        unsafe {
+            let mut info: libc::siginfo_t = std::mem::zeroed();
+            if libc::waitid(
+                libc::P_PID,
+                child.id(),
+                &mut info,
+                libc::WSTOPPED | libc::WCONTINUED | libc::WNOHANG,
+            ) != 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(info.si_pid() != 0 && info.si_code == libc::CLD_STOPPED)
+        }
+    }
+
+    fn sigtstp_ignored() -> bool {
+        unsafe {
+            let mut action: libc::sigaction = std::mem::zeroed();
+            libc::sigaction(libc::SIGTSTP, std::ptr::null(), &mut action) == 0
+                && action.sa_sigaction == libc::SIG_IGN
+        }
+    }
+
+    /// Must run on the main thread: the kernel delivers the self-sent SIGTSTP
+    /// to it, so `kill` returns only once the job has been continued. In an
+    /// orphaned process group the kernel discards SIGTSTP and this returns
+    /// immediately, resuming the child.
+    pub(super) fn follow_child_stop(child_pgid: i32) {
+        unsafe {
+            if libc::isatty(libc::STDIN_FILENO) != 1 {
+                return;
+            }
+            let wrapper_pgid = libc::getpgrp();
+            if libc::tcgetpgrp(libc::STDIN_FILENO) == child_pgid {
+                with_sigttou_blocked(|| libc::tcsetpgrp(libc::STDIN_FILENO, wrapper_pgid));
+            }
+            if !sigtstp_ignored() {
+                libc::kill(0, libc::SIGTSTP);
+            }
+            // Continued: in the foreground (`fg`) the child gets the terminal
+            // back; in the background (`bg`) the shell keeps it.
+            if libc::tcgetpgrp(libc::STDIN_FILENO) == wrapper_pgid {
+                with_sigttou_blocked(|| libc::tcsetpgrp(libc::STDIN_FILENO, child_pgid));
+            }
+            libc::kill(-child_pgid, libc::SIGCONT);
         }
     }
 }

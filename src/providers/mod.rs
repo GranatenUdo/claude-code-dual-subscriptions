@@ -3,5 +3,8 @@ pub mod codex;
 pub mod cursor;
 pub mod grok;
 pub mod kimi;
+pub(crate) mod messages_relay;
+pub(crate) mod messages_request;
 pub mod opencode;
+pub mod openrouter;
 pub mod translate_shared;

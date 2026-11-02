@@ -1984,7 +1984,7 @@ fn mock_setup_text(port: u16, registry: &Registry) -> String {
 
 pub fn setup_text(port: u16, registry: &Registry) -> String {
     let grouped = registry.grouped_models();
-    let model_summary = ["anthropic", "codex", "kimi", "cursor"]
+    let model_summary = ["anthropic", "codex", "kimi", "cursor", "openrouter"]
         .into_iter()
         .filter_map(|provider| {
             grouped

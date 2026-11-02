@@ -4,6 +4,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::paths;
+mod openrouter;
+pub use openrouter::{
+    OpenRouterConfig, openrouter_config, resolve_openrouter_config, valid_openrouter_model,
+};
 
 static DUAL_SESSION_DEFAULTS: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
@@ -56,6 +60,8 @@ struct FileConfig {
     pub cursor: Option<CursorConfig>,
     pub grok: Option<GrokConfig>,
     pub opencode: Option<OpenCodeConfig>,
+    // Parse independently so a malformed provider block cannot discard other settings.
+    pub openrouter: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize, Clone)]

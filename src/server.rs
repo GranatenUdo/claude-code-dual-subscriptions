@@ -1796,7 +1796,18 @@ async fn dispatch_request(
     // Translating providers must never receive client authentication, even if a
     // future provider overrides handle_request instead of the typed methods.
     if provider.name() != "anthropic" {
+        let protocol_headers = if provider.name() == "openrouter" {
+            ["anthropic-version", "anthropic-beta"]
+                .into_iter()
+                .filter_map(|name| parts.headers.get(name).cloned().map(|value| (name, value)))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         parts.headers.clear();
+        for (name, value) in protocol_headers {
+            parts.headers.insert(name, value);
+        }
         parts.uri = parts.uri.path().parse().expect("valid request path");
     }
     let response = provider

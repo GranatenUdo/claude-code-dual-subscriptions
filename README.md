@@ -145,3 +145,9 @@ at `2e2975a` (v0.1.45), with native passthrough adapted from
 [Sören Nikolaus's PR #133](https://github.com/raine/claude-code-proxy/pull/133),
 commit `f9084b283d5f7681b023bd40f7662659eae2f337`.
 Upstream history and the [MIT license](LICENSE) are retained.
+
+## OpenRouter models
+
+The proxy supports explicit `openrouter/<namespace>/<model>` IDs alongside subscription providers through OpenRouter's Anthropic Messages API. Set `OPENROUTER_API_KEY` on the proxy process, then select a model with `claude --model openrouter/anthropic/claude-sonnet-4`. Model availability depends on OpenRouter; this is an illustrative ID. Optional `openrouter.models` favorites are advertised without fetching a remote catalog.
+
+See [OpenRouter configuration and limitations](docs/src/content/docs/providers/openrouter.md). Tests use local fixtures; live compatibility and client picker visibility remain unverified. This does not extend the experimental dual launcher.

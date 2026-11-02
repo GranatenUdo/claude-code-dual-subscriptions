@@ -50,6 +50,7 @@ export default defineConfig({
             { label: 'Codex', slug: 'providers/codex' },
             { label: 'Kimi', slug: 'providers/kimi' },
             { label: 'OpenCode Go', slug: 'providers/opencode-go' },
+            { label: 'OpenRouter', slug: 'providers/openrouter' },
             { label: 'Cursor Agent', slug: 'providers/cursor-agent' },
           ],
         },

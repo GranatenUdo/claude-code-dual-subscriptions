@@ -7,6 +7,7 @@ Start with native Claude plus Codex for this fork: run the server with `CCP_ALIA
 
 | Provider | Account | Upstream protocol | Model selection | Notable capabilities |
 | --- | --- | --- | --- | --- |
+| [OpenRouter](/providers/openrouter/) | OpenRouter API key and credits | Anthropic-compatible Messages | `openrouter/<namespace>/<model>` | Explicit arbitrary IDs, configured favorites, tools and streaming subject to model capabilities; fixture-tested only |
 | [Anthropic](/providers/anthropic/) (opt-in) | Claude Code subscription login or Anthropic API credentials | Anthropic Messages passthrough | `claude-*` and built-in Claude aliases | Native tools, thinking and streaming; credentials forwarded from Claude Code |
 | [Codex](/providers/codex/) | ChatGPT Plus or Pro | OpenAI Responses over WebSocket or HTTP SSE | Named Codex catalog, `-fast` and `-ultrafast` variants | Function tools, image input, hosted web search, reasoning summaries, optional native Responses route |
 | [Kimi](/providers/kimi/) | kimi.com with Kimi Code access | OpenAI-style chat completions | `kimi-for-coding` and aliases | Function tools, reasoning, image and video input |

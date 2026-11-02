@@ -96,6 +96,10 @@ impl Registry {
         );
 
         let mut handlers = BTreeMap::new();
+        models.insert(
+            "openrouter".into(),
+            crate::providers::openrouter::advertised_models(),
+        );
         for (name, entries) in &models {
             let handler: Arc<dyn Provider> = match name.as_str() {
                 "anthropic" => Arc::new(crate::providers::anthropic::AnthropicProvider::new()),
@@ -104,6 +108,7 @@ impl Registry {
                 "cursor" => Arc::new(crate::providers::cursor::CursorProvider::new()),
                 "grok" => Arc::new(crate::providers::grok::GrokProvider::new()),
                 "opencode" => Arc::new(crate::providers::opencode::OpenCodeProvider::new()),
+                "openrouter" => Arc::new(crate::providers::openrouter::OpenRouterProvider::new()),
                 _ => Arc::new(PlaceholderProvider::new(name, entries.clone())),
             };
             handlers.insert(name.clone(), handler);
@@ -185,6 +190,9 @@ impl Registry {
         session_affinity: Option<&AliasProvider>,
     ) -> Option<Arc<dyn Provider>> {
         let normalized = normalize_incoming_model(raw_model);
+        if normalized.starts_with("openrouter/") {
+            return self.handlers.get("openrouter").cloned();
+        }
         // Explicit Claude selection must survive a preceding Codex/Kimi turn.
         if self.alias_provider == AliasProvider::Anthropic
             && (is_anthropic_alias(&normalized) || normalized.starts_with("claude-"))

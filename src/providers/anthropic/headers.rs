@@ -1,6 +1,6 @@
 use http::{HeaderMap, HeaderName, header};
 
-pub(super) fn forwarded_headers(headers: &HeaderMap) -> HeaderMap {
+pub(crate) fn forwarded_headers(headers: &HeaderMap) -> HeaderMap {
     let connection_headers: Vec<HeaderName> = headers
         .get_all(header::CONNECTION)
         .iter()

@@ -9,6 +9,7 @@ The model ID in each request selects its provider. For dual subscriptions explic
 
 | Pattern | Provider |
 | --- | --- |
+| `openrouter/<namespace>/<model>` | OpenRouter, including IDs not in configured favorites |
 | Registered `gpt-*` IDs and their `-fast` and `-ultrafast` forms | Codex |
 | `kimi-for-coding`, `kimi-k2.6`, `k2.6`, `kimi-k3`, `k3` | Kimi |
 | Non-conflicting registered OpenCode Go IDs and every `opencode-go/<model-id>` | OpenCode Go |
@@ -27,6 +28,8 @@ rejects Sol.
 Native short aliases resolve as follows: `haiku` → `claude-haiku-4-5`, `sonnet` → `claude-sonnet-5`, `opus` → `claude-opus-5-5`, `fable` → `claude-fable-5`. Native Claude also bypasses auto-review overrides.
 
 ## Prefer the local catalog
+
+[OpenRouter](/providers/openrouter/) advertises configured `openrouter.models` favorites without fetching a remote catalog. Any valid explicit `openrouter/<namespace>/<model>` remains routable. Picker visibility depends on Claude Code's version; explicit selection remains available.
 
 The model list changes faster than documentation. Ask the installed CLI:
 

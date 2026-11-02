@@ -1,5 +1,5 @@
-mod headers;
-mod request;
+pub(crate) mod headers;
+pub(crate) mod request;
 mod response;
 
 use std::time::Duration;

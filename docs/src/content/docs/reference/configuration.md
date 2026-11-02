@@ -119,3 +119,13 @@ Endpoint and client identity overrides can break provider compatibility. Use def
 ## Client-side subagent default
 
 `CLAUDE_CODE_SUBAGENT_MODEL=gpt-6-astra[1m]` belongs in the Claude Code launch environment or project-local settings `env`, not this proxy configuration. The proxy remains in `aliasProvider=anthropic` mode. See [the confirmed 2.1.299 setup](/using/subagents/) for a merge-safe example, restart and verification.
+
+## OpenRouter
+
+| Environment | Config key | Default | Purpose |
+| --- | --- | --- | --- |
+| `CCP_OPENROUTER_API_KEY`, then `OPENROUTER_API_KEY` | `openrouter.apiKey` | unset | First nonempty environment key wins over configuration. |
+| `CCP_OPENROUTER_BASE_URL` | `openrouter.baseUrl` | `https://openrouter.ai/api/v1` | Base URL; the provider appends `/messages`. |
+| — | `openrouter.models` | `[]` | Raw namespaced upstream IDs to advertise as favorites. |
+
+Invalid OpenRouter configuration disables only OpenRouter. Diagnostics do not reveal keys or raw invalid URLs. See [OpenRouter setup and compatibility](/providers/openrouter/).

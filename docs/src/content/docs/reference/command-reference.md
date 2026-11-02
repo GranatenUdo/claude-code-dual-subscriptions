@@ -100,3 +100,14 @@ just docs
 ```
 
 `just docs` installs the locked documentation dependencies and starts the Astro development server on an available local port.
+
+## `openrouter auth`
+
+```sh
+claude-code-proxy openrouter auth status
+claude-code-proxy openrouter auth login
+claude-code-proxy openrouter auth device
+claude-code-proxy openrouter auth logout
+```
+
+`status` reports key configuration and source without making a remote call. The other commands return setup/removal instructions without modifying credentials. Configure the API key on the proxy process; see [OpenRouter](/providers/openrouter/).
